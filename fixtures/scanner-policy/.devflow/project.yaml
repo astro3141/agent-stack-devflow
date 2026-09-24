@@ -184,6 +184,7 @@ reviews:
   # with the contracts and the implementation as materials, ran past the execution profile's 600 s
   # limit and produced nothing. The number of reviewers is a time and cost choice, not a quality one.
   assignment: per_lens
+  retries: 1                        # one more attempt for a reviewer that timed out or failed (measured: one of four timed out)
   budget: {model_calls: 8}          # per task, across its runs — two rounds of four lenses
 
 loop:
