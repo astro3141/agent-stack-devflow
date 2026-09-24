@@ -258,6 +258,10 @@ def frame_of(reg, pol, wf, pr, canonical_head, criteria_blobs, hook_digests, tas
     # change touches a shared artifact (integration checks that separately).
     ident = {k: v for k, v in core.items() if k != "canonical_head"}
     core["id"] = sha256(canon(ident))[:16]
+    # what a review's judgement rests on: the blobs of every pinned criterion and contract. A review
+    # names it, so an amended ADR or criterion on canonical makes a person's review stale too — not
+    # only a model's, which is bound to the whole frame (a workflow update alone does not).
+    core["basis"] = sha256(canon(criteria_blobs))[:12]
     return core
 
 
@@ -408,6 +412,9 @@ def validate_review(r, frame, lens_defs, implementers):
         why.append("written for another frame (policy, criteria or workflow changed since)")
     if r.get("policy_digest") != frame["policy"]["digest"]:
         why.append("written under another policy version")
+    if r.get("basis_digest") != frame.get("basis"):
+        why.append(f"written against other criteria or contracts (basis {r.get('basis_digest')!r}, "
+                   f"now {frame.get('basis')!r})")
     who = r.get("reviewer") or {}
     if not who.get("identity"):
         why.append("does not say who reviewed")
@@ -711,7 +718,8 @@ def render_state(state):
              f" · execution `{state['execution']['status']}` · reviews `{state['reviews']['status']}`",
              f"frame `{f.get('id', '')}` · head `{str(f.get('head_sha'))[:12]}` · base `{str(f.get('base_sha'))[:12]}`"
              f" · canonical `{str(f.get('canonical_head'))[:12]}` · workflow {wf.get('version', '')}/{wf.get('digest', '')}"
-             f" · policy `{pol.get('digest', '')}` @ `{str(pol.get('ref'))[:12]}`"]
+             f" · policy `{pol.get('digest', '')}` @ `{str(pol.get('ref'))[:12]}`"
+             f" · basis `{f.get('basis', '')}` (a review names head, policy_digest and basis_digest)"]
     for name, r in sorted(((state.get("checks") or {}).get("results") or {}).items()):
         extra = f" — {r['why']}" if r.get("why") else ""
         extra += f" (exception: {r['exception']})" if r.get("exception") else ""

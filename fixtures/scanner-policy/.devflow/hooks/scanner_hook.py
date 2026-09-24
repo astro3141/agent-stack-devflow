@@ -263,8 +263,11 @@ def materials(doc):
         elif re.fullmatch(r"SRV-\d{3}", str(item)):
             crit += [f"items/efin/{item}.yaml"]
     crit.append("docs/baselines/BASELINE_MANIFEST.md")
-    answer(criteria=crit, contracts=["primitives.yaml", "evidence_keys.yaml", "evaluator/check_registry.py",
-                                     "docs/SPECIFICATION_v0.3.md"])
+    # the contracts the policy pins, as text a reviewer can read (the binary criteria are not)
+    auth = (doc.get("policy") or {}).get("authority") or {}
+    contracts = [p for src in auth.get("contracts") or [] for p in src.get("paths") or []
+                 if p.endswith((".md", ".yaml", ".py"))]
+    answer(criteria=crit, contracts=contracts)
 
 
 # ------------------------------------------------------------------------------ transaction

@@ -115,11 +115,16 @@ def canonical_digest(db):
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
+def canonical_basis(db):
+    r = R(db)
+    return build.basis_of(r["commits"][r["branches"][build.CANONICAL]]["files"])
+
+
 def add_review(db, head, lenses=build.LENSES_PASS, user="rev-person", **kw):
-    """A review written now: under the policy that is on canonical now."""
+    """A review written now: under the policy, criteria and contracts on canonical now."""
     rv = R(db)["reviews"].setdefault("7", [])
     rv.append({"id": 200 + len(rv), "user": user, "commit_id": head, "state": "COMMENTED",
-               "body": build.review_body(head, lenses, digest=canonical_digest(db), **kw)})
+               "body": build.review_body(head, lenses, digest=canonical_digest(db), basis=canonical_basis(db), **kw)})
 
 
 def edit_policy(db, fn, head_too=True):
@@ -150,6 +155,29 @@ def set_task(db, **fields):
 def head_file(db, path, text):
     r = R(db)
     r["commits"][r["pulls"]["7"]["head_sha"]]["files"][path] = text
+
+
+def land_and_update(db, path, text):
+    """`path` changes on canonical in a new commit, and the pull request is updated onto it: a new
+    head with the same change on top, green checks. Returns the new head."""
+    r = R(db)
+    c0 = r["branches"][build.CANONICAL]
+    c1 = build.move_canonical(db, {path: text})
+    old = r["commits"][r["pulls"]["7"]["head_sha"]]["files"]
+    files = dict(old, **{path: text})
+    new = "h9" + build.sha(json.dumps(files, sort_keys=True))[:38]
+    r["commits"][new] = {"parents": [c1], "files": files, "author": "impl-bot"}
+    r["pulls"]["7"].update(head_sha=new, base_sha=c1)
+    r["check_runs"][new] = build.check_runs()
+    assert c1 != c0
+    return new
+
+
+def base_files_before(db):
+    """The canonical tree before its last commit — what a review written earlier stood on."""
+    r = R(db)
+    c = r["branches"][build.CANONICAL]
+    return r["commits"][r["commits"][c]["parents"][0]]["files"]
 
 
 # ================================================================================== flow
@@ -381,18 +409,36 @@ def controls_stale():
     finally:
         s.close()
 
-    # an official criterion changes on canonical: the frame changes, a semantic review is stale
+    # A pinned criterion or contract lands on canonical and the change is updated onto it: the diff
+    # is the same, the head is new-but-equivalent, and only what the judgement rests on moved. Each
+    # case on its own task, so one case's staleness is not another's.
+    for path, text, what in (
+            ("docs/baselines/current/주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드.pdf",
+             "PDF-KISA-2026-REVISED", "an official criterion"),
+            ("docs/adr/existing-primitive-semantic-parity.md", "# ADR parity, amended\n", "an ADR"),
+            ("evaluator/applicability_registry.py", "APPLICABILITY_REGISTRY = {'x': 1}\n", "a TD §5.7 registry")):
+        s = Sim(build.scanner_pass())
+        try:
+            r1 = s.run()
+            head = s.edit(lambda db, path=path, text=text: land_and_update(db, path, text))
+            s.edit(lambda db, head=head: R(db)["reviews"]["7"].append(
+                {"id": 500, "user": "rev-person", "commit_id": head, "state": "COMMENTED",
+                 "body": build.review_body(head, build.LENSES_PASS, digest=canonical_digest(db),
+                                           basis=build.basis_of(base_files_before(db)))}))
+            r2 = s.run()
+            check(f"{what} amended on canonical: the frame changes",
+                  r1["state"]["frame"]["id"] != r2["state"]["frame"]["id"], True)
+            check(f"{what} amended: a review of the same diff on the old basis does not count",
+                  (verdict(r2), [x["why"] for x in r2["state"]["review_results"] if x["source"] == "github-review:500"][0][0].startswith("written against other criteria or contracts")),
+                  (None, True))
+            s.edit(lambda db, head=head: add_review(db, head))
+            check(f"{what} amended: a review on the new basis does", verdict(s.run()), "PASS")
+        finally:
+            s.close()
+
+    # a policy change on canonical: reviews name the policy digest they were written under
     s = Sim(build.scanner_pass())
     try:
-        r1 = s.run()
-        s.edit(lambda db: R(db)["commits"][R(db)["branches"][build.CANONICAL]]["files"].__setitem__(
-            "docs/baselines/current/주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드.pdf", "PDF-KISA-2026-REVISED"))
-        r2 = s.run()
-        check("a criterion file changing on canonical changes the frame",
-              r1["state"]["frame"]["id"] != r2["state"]["frame"]["id"], True)
-        check("a model review accepted for the old frame would not be reused",
-              [a for a in r2["state"].get("accepted_reviews") or [] if a["frame_id"] == r2["state"]["frame"]["id"]], [])
-        # a policy change on canonical: reviews name the policy digest they were written under
         s.edit(lambda db: edit_policy(db, lambda p: p["loop"].__setitem__("max_no_progress", 2)))
         r3 = s.run()
         check("the policy changing on canonical invalidates reviews written under the old one",
@@ -449,7 +495,7 @@ def controls_foundation():
         check("gate 1 approved; the only review is the implementer's: independent review missing",
               (verdict(r), r["state"]["reviews"]["independent_ok"]), (None, False))
         # same principal through another vendor: still one reviewer
-        body = build.review_body(head, lenses, digest=canonical_digest(s.db))
+        body = build.review_body(head, lenses, digest=canonical_digest(s.db), basis=canonical_basis(s.db))
         doc = json.loads(body.split("```devflow-review\n")[1].split("\n```")[0])
         doc["reviewer"] = {"kind": "model", "principal": "impl-principal", "provider": "codex", "fresh_context": True}
         s.edit(lambda db: R(db)["reviews"]["7"].append({"id": 400, "user": "model-runner", "commit_id": head, "state": "COMMENTED",
@@ -534,7 +580,7 @@ def model_receipt(ws, members, context=None, write=True, stale=False, tamper=Fal
     rc = {"context": context or frame["id"], "members": {}}
     for label, lenses in members.items():
         name = f"review_{label}.json"
-        body = build.review_body(frame["head_sha"], lenses)
+        body = build.review_body(frame["head_sha"], lenses, basis=frame["basis"])
         doc = json.loads(body.split("```devflow-review\n")[1].split("\n```")[0])
         doc["frame_id"] = frame["id"]
         text = json.dumps(doc)

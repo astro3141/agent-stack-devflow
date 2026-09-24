@@ -84,7 +84,7 @@ or `run_workflow.py show <id>` for the run itself.
 | state | what a person or implementer does |
 |---|---|
 | waiting · implementation | open the PR / push the fix; name the PR in the task block (`pr: 7`) |
-| waiting · review | a reviewer posts a PR review on **this head** with a ```` ```devflow-review ```` block (fields: `head_sha`, `policy_digest`, `lenses`, `materials`, `answers`, `findings`, `unverified`, `verdict` — see `prompts/review.md`); or run with `review_mode=model` |
+| waiting · review | a reviewer posts a PR review on **this head** with a ```` ```devflow-review ```` block (fields: `head_sha`, `policy_digest`, `basis_digest` — all three from the state comment — `lenses`, `materials`, `answers`, `findings`, `unverified`, `verdict` — see `prompts/review.md`); or run with `review_mode=model` |
 | waiting · decision | a person named in the policy comments `/devflow approve <gate> <task digest \| head sha>`, or records the decision in the task |
 | waiting · verification | CI on the head; or `/devflow except <check> <head sha> <reason and alternative evidence>` for a check that could not run — never for a FAIL |
 | waiting · merge | the merge owner merges exactly the named head |

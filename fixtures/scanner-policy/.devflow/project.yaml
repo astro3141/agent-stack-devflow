@@ -49,6 +49,21 @@ impact_flags: [item_changed, contract_changed, evaluator_changed, shared_plan_ch
 
 # The official criteria and the contracts in force. Their blobs are part of every verdict's frame:
 # when one of them changes on canonical, earlier reviews of semantic changes are stale.
+#
+# Which is which, as this repository states it (read at c6bd082):
+#   criteria   what is 양호 / 취약 — "현행 진단 기준의 Source of Truth는 구현 시점의 최신 공식
+#              기준서이다" (Spec §6). Not the Spec, and not any list derived from these files.
+#   contracts  the Specification (requirements; it wins over the TD — Spec, end of document), the
+#              Technical Design (how; subordinate to the Spec — TD §0), the ADRs (OPERATING_POLICY
+#              names Spec / TD / ADR as product contract authority), and the registries TD §5.7 makes
+#              the single source of truth for their kind.
+# Each file is named, not its directory: a verdict is pinned to blobs. `devflow-policy` fails when
+# docs/adr/ holds an ADR this list does not name.
+#
+# Known drift, left to a person (authority documents are not ordinary task work): TD §5.7 names
+# items/definitions/**/*.yaml as the Framework Item source of truth, but that directory holds only
+# EXAMPLE-FILE-001.yaml; the items are in items/kisa/ and items/efin/, which evaluator.py also loads.
+# TD §5.7 still calls primitives.yaml "Phase 5.3-B 신설 예정"; the file exists.
 authority:
   criteria:
     - id: kisa-2026
@@ -62,12 +77,23 @@ authority:
   contracts:
     - id: spec
       role: contract
-      paths: [docs/SPECIFICATION_v0.3.md, docs/TECHNICAL_DESIGN_v0.3.md, docs/TD_tail.md]
-    - id: registries
+      paths: [docs/SPECIFICATION_v0.3.md]
+    - id: td
       role: contract
-      paths: [primitives.yaml, evidence_keys.yaml]
-  # Roles only — none of these is ranked above an observation by rule (Profile §2).
-  auxiliary: ["items/_raw_excel/**", "items/_raw_pdf/**", "corpus/**"]
+      paths: [docs/TECHNICAL_DESIGN_v0.3.md, docs/TD_tail.md]
+    - id: adr
+      role: contract
+      paths: [docs/adr/collection-plan-transitional-architecture.md, docs/adr/existing-primitive-semantic-parity.md]
+    - id: registries                  # TD §5.7 — the single source of truth of each registry
+      role: contract
+      paths: [primitives.yaml, evidence_keys.yaml, evaluator/check_registry.py, evaluator/applicability_registry.py]
+  # Not authority. Roles only — none of these is ranked above an observation by rule (Profile §2).
+  #   the implementation matrix calls itself "계획용 보조 자료 … 공식 기준서 대조 전에는 구현 입력이나
+  #   확정 Item 분류로 사용하면 안 된다" (guard-protected against edits — protection is not authority);
+  #   _expected_items.yaml is a list extracted from the KISA PDF pp.8–11 (the loader skips `_` files);
+  #   the raw extracts and the legacy corpus are exploration material (TD §0.1).
+  auxiliary: ["docs/implementation/linux-item-implementation-matrix.md", "items/_expected_items.yaml",
+              "items/_raw_excel/**", "items/_raw_efin_excel/**", "items/_raw_pdf/**", "corpus/**"]
 
 # The scanner's own state names, as the code has them (evaluator/check_registry.py `on_not_found`
 # enum; evaluator/evaluator.py collection statuses). A trace's expected results must use these —

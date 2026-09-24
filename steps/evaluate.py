@@ -461,6 +461,7 @@ def write_prompt(a, chosen, frame, ev):
                .replace("{LENS_IDS}", json.dumps(a["lenses"]))
                .replace("{HEAD}", str(frame["head_sha"])).replace("{FRAME}", frame["id"])
                .replace("{POLICY}", frame["policy"]["digest"])
+               .replace("{BASIS}", frame["basis"])
                .replace("{MATERIALS}", os.path.join(D, "materials"))
                .replace("{OUT}", os.path.join(WS, f"review_{a['reviewer']}.json")))
     p = os.path.join(D, f"prompt_{a['reviewer']}.md")

@@ -97,7 +97,13 @@ def base_files():
               "primitives.yaml": "primitives: []\n",
               "docs/baselines/current/주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드.pdf": "PDF-KISA-2026",
               "docs/baselines/current/전자금융기반시설 보안 취약점 평가기준(제2026-1호)_2026-03개정.xlsx": "XLSX-EFIN",
-              "docs/SPECIFICATION_v0.3.md": "# Spec\n", "evidence_keys.yaml": "keys: []\n"})
+              "docs/SPECIFICATION_v0.3.md": "# Spec\n", "evidence_keys.yaml": "keys: []\n",
+              # the rest of what the policy pins as contracts (authority.contracts)
+              "docs/TECHNICAL_DESIGN_v0.3.md": "# TD\n", "docs/TD_tail.md": "# TD tail\n",
+              "docs/adr/collection-plan-transitional-architecture.md": "# ADR plan\n",
+              "docs/adr/existing-primitive-semantic-parity.md": "# ADR parity\n",
+              "evaluator/check_registry.py": "CHECK_REGISTRY = {}\n",
+              "evaluator/applicability_registry.py": "APPLICABILITY_REGISTRY = {}\n"})
     return f
 
 
@@ -130,10 +136,26 @@ def lens_questions():
     return out
 
 
+def basis_of(files):
+    """The basis digest devflow computes for a canonical tree: the blob of every criterion and
+    contract its policy pins (dfcore.frame_of), with the fixture remote's blob ids (sha1 of text)."""
+    import yaml
+    sys.path.insert(0, os.path.join(PKG, "lib"))
+    import dfcore
+    pol = yaml.safe_load(files[".devflow/project.yaml"])
+    auth = pol.get("authority") or {}
+    blobs = {}
+    for src in (auth.get("criteria") or []) + (auth.get("contracts") or []):
+        for p in src.get("paths") or []:
+            blobs[p] = sha(files[p]) if p in files else "absent"
+    return dfcore.sha256(dfcore.canon(blobs))[:12]
+
+
 def review_body(head, lenses, reads=("diff", "task", "trace", "criteria", "contracts", "artifact_ops"),
-                verdict="PASS", findings=(), unverified=None, digest=None):
+                verdict="PASS", findings=(), unverified=None, digest=None, basis=None):
     qs = lens_questions()
-    doc = {"head_sha": head, "policy_digest": digest or policy_digest(), "lenses": list(lenses),
+    doc = {"head_sha": head, "policy_digest": digest or policy_digest(),
+           "basis_digest": basis or basis_of(base_files()), "lenses": list(lenses),
            "materials": [{"ref": r, "read": True} for r in reads],
            "answers": {l: {q: "checked against the materials" for q in qs[l]} for l in lenses},
            "findings": list(findings), "unverified": unverified or {}, "verdict": verdict}

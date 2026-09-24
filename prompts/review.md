@@ -41,6 +41,7 @@ Write exactly one file, `{OUT}`, in the run's workspace (use the file tool), con
   "head_sha": "{HEAD}",
   "frame_id": "{FRAME}",
   "policy_digest": "{POLICY}",
+  "basis_digest": "{BASIS}",
   "lenses": {LENS_IDS},
   "materials": [{"ref": "diff", "read": true}, {"ref": "task", "read": true}],
   "answers": {"<lens id>": {"<question id>": "<answer, with the evidence>"}},
