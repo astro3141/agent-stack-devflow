@@ -14,12 +14,10 @@ What a repeat does: "yes" — the same evaluation gives the same plan.
 REPEATABLE = "yes"
 import json, os, sys
 
-sys.path.insert(0, "/work/p281")
-try:
-    import settings
-    WS_ROOT = settings.runtime()["paths"]["workspace_root"]
-except Exception:
-    WS_ROOT = os.environ.get("AGENTSTACK_WORKSPACE_ROOT", "/ws")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
+import stackenv  # noqa: E402
+
+WS_ROOT, _ = stackenv.load(need_proxy=False)
 RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
 D = os.path.join(WS_ROOT, RUN, "devflow")
 

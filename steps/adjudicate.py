@@ -18,14 +18,10 @@ import hashlib, json, os, sys
 
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
-sys.path.insert(0, "/work/p281")
 import dfcore  # noqa: E402
+import stackenv  # noqa: E402
 
-try:
-    import settings
-    WS_ROOT = settings.runtime()["paths"]["workspace_root"]
-except Exception:
-    WS_ROOT = os.environ.get("AGENTSTACK_WORKSPACE_ROOT", "/ws")
+WS_ROOT, _ = stackenv.load(need_proxy=False)
 RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
 WS = os.path.join(WS_ROOT, RUN)
 D = os.path.join(WS, "devflow")

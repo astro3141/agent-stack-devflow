@@ -785,6 +785,14 @@ def controls_rules():
 def controls_tool():
     print("")
     print("tool — machinery failing is not a judgement about the work")
+    # outside the stack's PYTHONPATH a step cannot know its workspace or its egress: it stops
+    env = {**os.environ, "PYTHONPATH": "", "CONDUCTOR_SELF_RUN_ID": "ctl-" + secrets.token_hex(4)}
+    for name, args in (("evaluate.py", ["scanner-fixture", "3", "ctl", "external"]), ("adjudicate.py", [""]),
+                       ("integrate.py", ["scanner-fixture"]), ("publish.py", ["scanner-fixture"]),
+                       ("review_plan.py", ["claude", "claude", "direct", "devflow-reviewer"])):
+        out = step(name, args, env)
+        check(f"{name} without the stack's settings: TOOL_FAILURE, not a run on defaults",
+              (out.get("status"), "settings" in str(out.get("error"))), ("TOOL_FAILURE", True))
     s = Sim(build.scanner_pass())
     try:
         s.edit(lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"],
