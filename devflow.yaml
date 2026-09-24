@@ -72,7 +72,7 @@ agents:
     type: script
     description: Quota admission for the model reviews (a HOLD means no model review this run, not a verdict)
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/p281/steps/route.py", "{{ workflow.input.profile }}"]
+    args: ["/work/stack/steps/route.py", "{{ workflow.input.profile }}"]
     output:
       decision: {type: string}
       provider: {type: string}
@@ -107,7 +107,7 @@ agents:
     type: script
     description: The model reviews, started together; the receipt is bound to the frame id
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/p281/steps/tasks.py", "devflow/review_receipt.json", "{{ review_plan.output.context }}",
+    args: ["/work/stack/steps/tasks.py", "devflow/review_receipt.json", "{{ review_plan.output.context }}",
            "{{ route.output.profile }}", "--plan", "{{ review_plan.output.plan }}"]
     timeout: 1500
     output:
@@ -181,7 +181,7 @@ agents:
     type: script
     description: Record the run (never changes its outcome)
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/p281/steps/record.py"]
+    args: ["/work/stack/steps/record.py"]
     stdin: "{{ {'receipts': ([reviews.output.receipt] if reviews is defined else []), 'check': {'decision': publish.output.verdict, 'reason': (publish.output.next or adjudicate.output.reason), 'file_sha256': ''}, 'evidence_file': publish.output.evidence_index, 'measurements': {'model_calls': adjudicate.output.model_calls}, 'route': (route.output if route is defined else {'decision': 'NOT_NEEDED', 'reason': 'no model review was needed or allowed in this run'})} | tojson }}"
     output:
       mlflow_run_id: {type: string}

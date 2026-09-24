@@ -28,7 +28,7 @@ import build  # noqa: E402
 
 PY = sys.executable
 STEPS = os.path.join(PKG, "steps")
-WS_ROOT = os.environ.get("P281_WORKSPACE_ROOT", "/ws")
+WS_ROOT = os.environ.get("AGENTSTACK_WORKSPACE_ROOT", "/ws")
 PASS_, FAIL_ = [], []
 
 

@@ -67,9 +67,9 @@ scripts/up.sh             applies principals.yaml (devflow-reviewer) and restart
 then:
 
 ```bash
-docker exec cadp278-agent /opt/venv/bin/python /work/p281/run_workflow.py \
+docker exec cadp278-agent /opt/venv/bin/python /work/stack/run_workflow.py \
   start task-12-a devflow research-default project=infra-scanner issue=12 --detach
-docker exec cadp278-agent /opt/venv/bin/python /work/p281/run_workflow.py tail task-12-a --follow
+docker exec cadp278-agent /opt/venv/bin/python /work/stack/run_workflow.py tail task-12-a --follow
 ```
 
 Inputs: `project` (a registration), `issue`, `review_mode` (`model` — a model may supply a missing

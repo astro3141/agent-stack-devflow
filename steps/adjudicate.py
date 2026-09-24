@@ -25,7 +25,7 @@ try:
     import settings
     WS_ROOT = settings.runtime()["paths"]["workspace_root"]
 except Exception:
-    WS_ROOT = os.environ.get("P281_WORKSPACE_ROOT", "/ws")
+    WS_ROOT = os.environ.get("AGENTSTACK_WORKSPACE_ROOT", "/ws")
 RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
 WS = os.path.join(WS_ROOT, RUN)
 D = os.path.join(WS, "devflow")
