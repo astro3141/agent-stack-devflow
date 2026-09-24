@@ -1,0 +1,169 @@
+# Infra Scanner — project policy for the devflow development workflow (agent-stack packages/devflow).
+#
+# What this file is: the project's rules, read by devflow **from the canonical branch**
+# (recovery/phase-5.3-b1) at the commit it evaluates. A pull request that edits this file, the
+# hook or the lenses is proposing new rules; it is judged by the rules already on canonical.
+#
+# Where it comes from:
+#   * 인프라 스캐너 개발 워크플로 — Project Profile v0.2, 설정표, 작업 템플릿 (Notion, 2026-09-24):
+#     the three classification axes, the review order, trace and confirmation states, shared
+#     generated artifacts, the default end point.
+#   * .issue-orchestrator/OPERATING_POLICY.md v1.3 (this repository, c6bd082): agents never merge,
+#     at most one automatic rework, Foundation's two human gates and its publication as a commit
+#     pair, labels as control signals, the guard paths. Where the two disagree this repository's
+#     operating policy wins: it is the one that is enforced here.
+#
+# Status: proposed with devflow's adoption. Values marked `PROPOSED` need the operator's
+# confirmation when this file is merged; changing automation scope is an operator decision
+# (OPERATING_POLICY.md, "이 문서의 지위").
+schema: devflow/project@1
+project: infra-scanner
+
+hook:
+  command: [python, .devflow/hooks/scanner_hook.py]
+  files: [.devflow/hooks/scanner_hook.py, .devflow/lenses.yaml]
+
+# Paths whose change is a change to these rules (in addition to this file and the hook files).
+# A task's own trace (.devflow/tasks/) is data about that task, not a rule.
+rule_paths:
+  - ".devflow/project.yaml"
+  - ".devflow/lenses.yaml"
+  - ".devflow/hooks/*"
+  - ".devflow/templates/*"
+  - ".github/workflows/*"
+  - ".issue-orchestrator/*"
+  - ".issue-orchestrator/**"
+  - ".prompts/*"
+  - ".claude/*"
+  - ".claude/**"
+  - ".githooks/*"
+  - "CLAUDE.md"
+
+defaults:
+  end_point: integration            # canonical 통합 후 최종 검증·적용 생성물 확인 (Profile §1)
+
+# 작업 유형 · 변경 클래스 · 영향 표시 (Profile §3; 설정표 §1)
+task_types: [feature, bug, refactor, dependency, docs, build]
+change_classes: [ORDINARY, FOUNDATION, CRITERION_CORRECTION]
+impact_flags: [item_changed, contract_changed, evaluator_changed, shared_plan_changed, builder_changed, criterion_changed]
+
+# The official criteria and the contracts in force. Their blobs are part of every verdict's frame:
+# when one of them changes on canonical, earlier reviews of semantic changes are stale.
+authority:
+  criteria:
+    - id: kisa-2026
+      role: criterion
+      paths: ["docs/baselines/current/주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드.pdf"]
+      version: "2026 (no revision number in the document; BASELINE_MANIFEST.md §2)"
+    - id: efin-2026-1-2026-03
+      role: criterion
+      paths: ["docs/baselines/current/전자금융기반시설 보안 취약점 평가기준(제2026-1호)_2026-03개정.xlsx"]
+      version: "제2026-1호, 2026-03 개정 (BASELINE_MANIFEST.md §1)"
+  contracts:
+    - id: spec
+      role: contract
+      paths: [docs/SPECIFICATION_v0.3.md, docs/TECHNICAL_DESIGN_v0.3.md, docs/TD_tail.md]
+    - id: registries
+      role: contract
+      paths: [primitives.yaml, evidence_keys.yaml]
+  # Roles only — none of these is ranked above an observation by rule (Profile §2).
+  auxiliary: ["items/_raw_excel/**", "items/_raw_pdf/**", "corpus/**"]
+
+# The scanner's own state names, as the code has them (evaluator/check_registry.py `on_not_found`
+# enum; evaluator/evaluator.py collection statuses). A trace's expected results must use these —
+# never a workflow's words. The CI job `devflow-policy` fails when the code's enum differs.
+verdict_states: [PASS, FAIL, NA, REVIEW, MANUAL, UNKNOWN]
+collection_states: [OK, NOT_FOUND, PERMISSION_DENIED, COMMAND_ERROR, UNSUPPORTED, TIMEOUT, PARTIAL]
+
+# Mirrors PROTECTED in .issue-orchestrator/authority-guard.sh (c6bd082). The CI job `devflow-policy`
+# fails when the two differ, so this copy cannot drift silently.
+paths:
+  authority_documents: [CLAUDE.md, docs/SPECIFICATION_v0.3.md, docs/TECHNICAL_DESIGN_v0.3.md, docs/TD_tail.md,
+                        docs/adr, docs/implementation/linux-item-implementation-matrix.md]
+  frozen_registries: [primitives.yaml, evidence_keys.yaml]
+  semantic_owners: [evaluator, collector]
+  items: [items/kisa, items/efin, items/definitions, bindings]
+  builder: [scripts/build_submission.py, run_submission_tests.sh, scripts/run_mutation_checks.py]
+  shared_plan: [collection-plan.tsv, dist/collection-plan.tsv, dist/infra-collector.sh]
+  criteria_sources: [docs/baselines]
+  count_assertions: ["tests/test_u43_nis.py", "tests/test_u54_ftp.py", "tests/test_collection_plan_*.py"]
+
+# Checks — the GitHub Actions job names in .github/workflows/devflow-ci.yml.
+#   scanner-quick    both guards (fetched from the pinned remote) + validate_schema_contracts + unittest
+#   scanner-publish  both guards + build_submission.py + no tracked file changed afterwards
+#   plan-ops         the Plan's operation difference against canonical, recorded as an artifact
+#   devflow-policy   .devflow paths mirror the authority guard
+checks:
+  always: [scanner-quick, devflow-policy]
+  by_impact:
+    item_changed: [scanner-publish, plan-ops]
+    contract_changed: [scanner-publish, plan-ops]
+    evaluator_changed: [scanner-publish, plan-ops]
+    shared_plan_changed: [scanner-publish, plan-ops]
+    builder_changed: [scanner-publish, plan-ops]
+    criterion_changed: [scanner-publish, plan-ops]
+
+post_merge:
+  # on the commit that landed on canonical: the full gate again, and the built submission artifact
+  checks: [scanner-quick, scanner-publish, devflow-policy]
+
+# Labels on the issue that a person placed as control signals (OPERATING_POLICY "Labels"). devflow
+# never writes labels; it reads these as holds.
+hold_labels:
+  "needs-human": NEEDS_DECISION
+  "proposed-tech-lead": HOLD
+  "blocked": HOLD
+  "blocked-*": HOLD
+  "blocked:*": HOLD
+  "failed": HOLD
+  "publish-failed": HOLD
+
+approvers: [astro3141]              # PROPOSED — 공식 기준·범위 결정 담당 (설정표: 확인 필요)
+
+human_gates:
+  FOUNDATION:
+    - {id: gate1, phase: prepare, binds: task}        # proposal and exact allowed scope
+    - {id: gate2, phase: integrate, binds: head}      # exact Foundation commit A
+  CRITERION_CORRECTION:
+    - {id: criterion, phase: prepare, binds: task}    # a changed reading of an official criterion
+
+# Foundation is published by a person as A+B (OPERATING_POLICY "Foundation Rebaseline Transaction");
+# A alone cannot be pushed, so it never exists as a pull request.
+flows:
+  FOUNDATION: transaction
+flow_defs:
+  transaction:
+    need: >-
+      Foundation A is reviewed before push and published by a person as A+B
+      (sh .issue-orchestrator/verify-rebaseline.sh preflight/postpublish). Then name A in the
+      task block: transaction_commit: <A sha>
+    owner: human operator
+    resume_when: canonical contains A and the rebaseline record
+    record_path: ".issue-orchestrator/rebaseline/{issue}-{commit}.yaml"
+
+reviews:
+  lens_files: [.devflow/lenses.yaml]
+  # Foundation: an identity separate from the implementer. Profile §7 and 설정표 allow a person or
+  # a separate review agent; OPERATING_POLICY allows an independent Reviewer session.
+  independent_for: [FOUNDATION]
+  independent_by: [model, human]
+  max_file_bytes: 200000
+  budget: {model_calls: 6}          # per task, across its runs
+
+loop:
+  max_rework: 1                     # OPERATING_POLICY "Rework": automatic rework at most once
+  max_no_progress: 3                # 개발 범용 워크플로 §8
+
+trace:
+  path: ".devflow/tasks/{task}.yaml"
+
+shared_artifacts:
+  - id: collection-plan
+    path: collection-plan.tsv
+    lock: collection-plan           # OPERATING_POLICY "Merge": item PRs are serialized on the Plan
+    dist: dist/collection-plan.tsv
+
+integration:
+  merge_by: human                   # OPERATING_POLICY "Merge": Agent는 merge하지 않는다
+  merge_owner: human operator
+  method: merge

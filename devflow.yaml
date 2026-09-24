@@ -1,0 +1,229 @@
+# devflow: one pass over one task. Each run reads the task's state from GitHub, advances it as far
+# as the evidence allows, publishes the state back to GitHub, and ends — so "resume" is simply the
+# next run, and nothing the task depends on lives in this runner between runs.
+#
+#   evaluate ──need models──▶ route ─ROUTE─▶ review_plan ─▶ reviews ─┐
+#      │                        └─HOLD──────────────────────────────┤
+#      └────────────────────────────────────────────────────────────▶ adjudicate
+#   adjudicate ─PASS on head / done─▶ integrate ─┐
+#      └───────────────────────────────────────▶ publish ─▶ record ─▶ ended_*
+#
+# Every edge is decided deterministically from a step's output (no model chooses a route).
+workflow:
+  name: devflow
+  description: Advance one development task (a GitHub issue) through 준비·구현·검증·리뷰·통합·완료
+  entry_point: evaluate
+  input:
+    profile:
+      type: string
+      required: false
+      default: research-default
+      description: execution profile — which provider may run a model review, under which quota
+    project:
+      type: string
+      required: true
+      description: a project registered in config/devflow/projects/<project>.yaml
+    issue:
+      type: string
+      required: true
+      description: the task's issue number (its body carries the ```devflow task block)
+    fixture:
+      type: string
+      required: false
+      default: ""
+      description: fixture remote scenario (projects whose registration says remote fixture)
+    review_mode:
+      type: string
+      required: false
+      default: model
+      description: "model | external — whether a model may supply a missing review in this run"
+    reviewer:
+      type: string
+      required: false
+      default: devflow-reviewer
+      description: the principal a model review runs as
+  limits:
+    max_iterations: 20
+    timeout_seconds: 2400
+
+agents:
+  - name: evaluate
+    type: script
+    description: Fix the frame (repository, base/head, workflow and policy digests, criteria) and gather the evidence
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/evaluate.py", "{{ workflow.input.project }}",
+           "{{ workflow.input.issue }}", "{{ workflow.input.fixture }}", "{{ workflow.input.review_mode }}"]
+    timeout: 600
+    output:
+      status: {type: string}
+      evaluation: {type: string}
+      need_models: {type: string}
+      assignments: {type: number}
+      merged: {type: string}
+      frame: {type: string}
+      head: {type: string}
+      error: {type: string}
+    routes:
+      - to: route
+        when: "{{ evaluate.output.need_models == 'yes' }}"
+      - to: adjudicate
+
+  - name: route
+    type: script
+    description: Quota admission for the model reviews (a HOLD means no model review this run, not a verdict)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/p281/steps/route.py", "{{ workflow.input.profile }}"]
+    output:
+      decision: {type: string}
+      provider: {type: string}
+      reason: {type: string}
+      evaluated: {type: string}
+      model_route: {type: string}
+      login: {type: string}
+      profile: {type: string}
+      evidence_dir: {type: string}
+    routes:
+      - to: review_plan
+        when: "{{ route.output.decision == 'ROUTE' }}"
+      - to: adjudicate
+
+  - name: review_plan
+    type: script
+    description: One fan-out member per model review assignment, under the reviewer principal
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/review_plan.py", "{{ route.output.provider }}",
+           "{{ route.output.login }}", "{{ route.output.model_route }}", "{{ workflow.input.reviewer }}"]
+    output:
+      status: {type: string}
+      plan: {type: string}
+      members: {type: number}
+      context: {type: string}
+    routes:
+      - to: reviews
+        when: "{{ review_plan.output.status == 'OK' }}"
+      - to: adjudicate
+
+  - name: reviews
+    type: script
+    description: The model reviews, started together; the receipt is bound to the frame id
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/p281/steps/tasks.py", "devflow/review_receipt.json", "{{ review_plan.output.context }}",
+           "{{ route.output.profile }}", "--plan", "{{ review_plan.output.plan }}"]
+    timeout: 1500
+    output:
+      status: {type: string}
+      receipt: {type: string}
+      tasks: {type: number}
+      produced: {type: number}
+      failed: {type: string}
+      wall_s: {type: number}
+    routes:
+      - to: adjudicate
+
+  - name: adjudicate
+    type: script
+    description: The task's phase, progress, execution status, review status and verdict — deterministic
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/adjudicate.py",
+           "{% if reviews is defined %}{{ reviews.output.receipt }}{% endif %}"]
+    output:
+      status: {type: string}
+      verdict: {type: string}
+      phase: {type: string}
+      progress: {type: string}
+      integrate: {type: string}
+      reason: {type: string}
+      next: {type: string}
+      state: {type: string}
+      model_calls: {type: number}
+      error: {type: string}
+    routes:
+      - to: integrate
+        when: "{{ adjudicate.output.integrate == 'yes' or adjudicate.output.phase == 'done' }}"
+      - to: publish
+
+  - name: integrate
+    type: script
+    description: Serialize on shared artifacts, re-check the head and canonical, merge or hand to the merge owner (guarded)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/integrate.py", "{{ workflow.input.project }}"]
+    output:
+      status: {type: string}
+      merged: {type: string}
+      ready: {type: string}
+      phase: {type: string}
+      progress: {type: string}
+      detail: {type: string}
+      error: {type: string}
+    routes:
+      - to: publish
+
+  - name: publish
+    type: script
+    description: The state on the task's issue and the verdict on the head commit (guarded)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/publish.py", "{{ workflow.input.project }}"]
+    output:
+      status: {type: string}
+      published: {type: string}
+      did: {type: string}
+      skipped: {type: string}
+      evidence_index: {type: string}
+      verdict: {type: string}
+      phase: {type: string}
+      progress: {type: string}
+      next: {type: string}
+      error: {type: string}
+    routes:
+      - to: record
+
+  - name: record
+    type: script
+    description: Record the run (never changes its outcome)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/p281/steps/record.py"]
+    stdin: "{{ {'receipts': ([reviews.output.receipt] if reviews is defined else []), 'check': {'decision': publish.output.verdict, 'reason': (publish.output.next or adjudicate.output.reason), 'file_sha256': ''}, 'evidence_file': publish.output.evidence_index, 'measurements': {'model_calls': adjudicate.output.model_calls}, 'route': (route.output if route is defined else {'decision': 'NOT_NEEDED', 'reason': 'no model review was needed or allowed in this run'})} | tojson }}"
+    output:
+      mlflow_run_id: {type: string}
+      experiment_id: {type: string}
+      executions: {type: number}
+      children: {type: number}
+      record_error: {type: string}
+    routes:
+      - to: ended_tool_failure
+        when: "{{ adjudicate.output.status == 'TOOL_FAILURE' or publish.output.status == 'TOOL_FAILURE' or (integrate is defined and integrate.output.status == 'TOOL_FAILURE') }}"
+      - to: ended_done
+        when: "{{ publish.output.phase == 'done' }}"
+      - to: ended_verdict
+
+  # Terminal names describe the run, not the work: a run that correctly concludes REQUEST_CHANGES
+  # succeeded. Only a run whose machinery failed ends as failed — and its verdict stays undecided.
+  - name: ended_done
+    type: terminate
+    status: success
+    reason: "done: {{ adjudicate.output.verdict }} — integrated and verified"
+
+  - name: ended_verdict
+    type: terminate
+    status: success
+    reason: "{{ publish.output.verdict }} · {{ publish.output.phase }} · {{ publish.output.progress }}: {{ publish.output.next }}"
+
+  - name: ended_tool_failure
+    type: terminate
+    status: failed
+    reason: "TOOL_FAILURE (verdict {{ adjudicate.output.verdict }}): {{ adjudicate.output.error }} {{ publish.output.error }}"
+
+output:
+  project: "{{ workflow.input.project }}"
+  issue: "{{ workflow.input.issue }}"
+  frame: "{{ evaluate.output.frame }}"
+  head: "{{ evaluate.output.head }}"
+  verdict: "{{ publish.output.verdict }}"
+  phase: "{{ publish.output.phase }}"
+  progress: "{{ publish.output.progress }}"
+  next: "{{ publish.output.next }}"
+  published: "{{ publish.output.published }}"
+  state: "{{ adjudicate.output.state }}"
+  decision: "{{ publish.output.verdict }}"
+  mlflow_run_id: "{{ record.output.mlflow_run_id }}"
+  record_error: "{{ record.output.record_error }}"

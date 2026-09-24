@@ -1,0 +1,28 @@
+# The identity devflow's model reviews run as, in the shape of config/principals.yaml.
+# `principals.py apply` (scripts/up.sh) creates it and mints its credential.
+#
+# A reviewer reads the frozen materials and writes its own review file — nothing else. It may not
+# edit anything, and it may not write anything but /ws/<run>/review_r<n>.json: the materials it
+# judges, and the workspace that holds the evaluation, are not its to change.
+#
+# This is a tool right, not independence. Independence is decided by dfcore.is_independent from
+# who implemented the change; a different model or vendor is never counted as independence.
+principals:
+  devflow-reviewer:
+    description: >
+      devflow's model reviewer. Reads the frozen review materials; writes only its own review file.
+    tool_rules:
+      write_file:
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/review_r')"
+          rule_description: a reviewer writes its own review file
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+      edit_file:
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: a reviewer changes nothing it reads

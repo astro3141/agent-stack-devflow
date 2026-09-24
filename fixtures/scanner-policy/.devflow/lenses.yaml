@@ -1,0 +1,24 @@
+# Infra Scanner's own review lenses, added to devflow's common library (which this file may not
+# redefine). Selected by the hook (scanner_hook.classify), each only when the change can affect it.
+# Source: Project Profile v0.2 §4, §6; CLAUDE.md; OPERATING_POLICY "Authority guard 한계 — Layer 2".
+schema: devflow/lenses@1
+lenses:
+  - id: scanner-outcomes
+    title: The four non-results, kept apart
+    read: [diff, task, trace, contracts]
+    questions:
+      - {id: applicability, q: "Is 'not applicable' reached only from the official applicability condition?"}
+      - {id: absence, q: "Is an absent target mapped by what absence means in the official criterion — not by default to PASS or NA?"}
+      - {id: collection, q: "Does a collection failure (PERMISSION_DENIED, COMMAND_ERROR, TIMEOUT, UNSUPPORTED) become UNKNOWN or PARTIAL — never FAIL, never a quiet PASS?"}
+      - {id: partial, q: "Is partial or insufficient evidence kept distinct from a confirmed mismatch?"}
+      - {id: reuse, q: "Is each reused Primitive/Check used for what its contract means — target, field, comparison, exception, aggregation — not for its name?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: scanner-merged-results
+    title: Results of items already merged
+    read: [diff, task, contracts]
+    questions:
+      - {id: evidence_meaning, q: "Does the meaning of any existing Evidence key change?"}
+      - {id: merged_items, q: "Does the verdict of any already-merged Item change (list them, with the reason)?"}
+      - {id: resolver, q: "Does the interpretation of an existing Check or resolver change?"}
+    submit: [basis.kind, basis.ref, claim, evidence]

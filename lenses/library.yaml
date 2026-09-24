@@ -1,0 +1,169 @@
+# devflow's common review lenses — the part every project shares.
+#
+# `base` runs on every change. A specialist lens runs only when its `when` holds for the change's
+# classification (change_class, task_type, impacts — produced by the project's hook), or when the
+# hook names it. A project adds lenses of its own in its policy's `reviews.lens_files`; it may not
+# redefine one of these.
+#
+# Lenses are units of *attention*, not of staffing: one reviewer may carry several, and a lens gets
+# a reviewer of its own only when the policy requires independence for it
+# (dfcore.assign_reviewers). Nothing here forces every lens, or several reviewers, on every task.
+#
+# Each lens says what it needs to be answered:
+#   read       materials the review must list as read; a review that did not read one leaves the
+#              lens *unverified* — it neither passes nor invents a defect
+#   questions  what the reviewer answers, each by id, in `answers`
+#   submit     what a blocking finding must carry
+#
+# Sources (read 2026-09-25):
+#   base        — 개발 범용 워크플로 v0.1 §4 3단계 (변경 범위, 회귀, 예외 경로, 인터페이스 호환성,
+#                 이해·유지보수성), and the development-workflow request of 2026-09-25
+#   cadp-*      — CADP Review Lens Library (Notion, edited 2026-09-24): its families, rewritten as
+#                 conditional questions. Deliberately NOT carried over: "Spec > TD > Trace" as a rule
+#                 that outranks what an execution actually showed (an observation that contradicts a
+#                 document is a finding to explain, not a trace to discard), and CADP-only concepts
+#                 (K2 / K4 / K7 grades, gateFiles, .cadp paths). Its rule "a procedure limitation is
+#                 never a rejection ground" is kept in the form devflow already enforces: what could
+#                 not be verified is `unverified`, never a defect.
+schema: devflow/lenses@1
+
+base:
+  title: Base review
+  read: [diff, task]
+  questions:
+    - {id: function, q: "Does the change do what the task's completion criteria say — each criterion with evidence, not with a command's exit code?"}
+    - {id: boundaries, q: "Are inputs, limits and edge cases at the boundaries handled?"}
+    - {id: errors, q: "Are failures reported as failures — never as success, never swallowed?"}
+    - {id: compatibility, q: "Does anything that consumed the old behaviour break or change meaning?"}
+    - {id: scope, q: "Does the diff match the declared scope and change class, with no out-of-scope change?"}
+    - {id: simplicity, q: "Is there a simpler design that meets the same requirement?"}
+    - {id: maintainability, q: "Can the next person see why it is this way — no hidden special case, no needless duplication?"}
+    - {id: tests, q: "Would the tests fail if the change were wrong — are expected values derived from the requirement, not copied from the output?"}
+  submit: [basis.kind, basis.ref, claim, evidence]
+
+lenses:
+  # ---------------------------------------------------------------- devflow's own
+  - id: criteria-trace
+    title: Official criteria conformance
+    when: {impacts: [criterion_changed, item_changed, semantic], change_classes: [CRITERION_CORRECTION]}
+    read: [diff, task, trace, criteria]
+    questions:
+      - {id: source, q: "Is every official condition traced to its version, clause and source text?"}
+      - {id: mapping, q: "Does each condition reach Evidence → Primitive/Check → Binding/Item → expected result, by meaning rather than by name?"}
+      - {id: outcomes, q: "Are not-applicable, target-absent, collection-failed and insufficient-evidence kept distinct, each mapped to a real state?"}
+      - {id: status, q: "Is each mapping's confirmed / provisional / unresolved status supported by what it cites — and is nothing provisional used as official?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: contract-semantics
+    title: Contract meaning
+    when: {impacts: [contract_changed, evaluator_changed]}
+    read: [diff, task, contracts]
+    questions:
+      - {id: meaning, q: "Does the meaning of an existing contract change, even where the name and shape do not?"}
+      - {id: consumers, q: "Which existing consumers' results change, and are they all listed?"}
+      - {id: expressible, q: "Can the needed meaning be expressed in the current contract, or is this a contract gap?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: shared-artifact
+    title: Shared generated artifact
+    when: {impacts: [shared_plan_changed, builder_changed]}
+    read: [diff, task, artifact_ops]
+    questions:
+      - {id: regenerated, q: "Was the artifact regenerated on the latest canonical head, in the confirmed order?"}
+      - {id: ops, q: "Does the actual operation difference equal the expected set, and is every difference explained?"}
+      - {id: counts, q: "Did count expectations change only as a consequence of expected operations — never to match output?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: foundation
+    title: Foundation change
+    when: {change_classes: [FOUNDATION]}
+    read: [diff, task, contracts]
+    questions:
+      - {id: bounded, q: "Is the change bounded to what was approved, file by file?"}
+      - {id: enables, q: "Does it enable exactly what it claims, proven by tests rather than by description?"}
+      - {id: no_new_meaning, q: "Does it avoid meaning the approved scope did not include?"}
+      - {id: consumers, q: "Were the affected consumers' regressions run, and do their results still hold?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: policy-change
+    title: A change to the rules themselves
+    when: {impacts: [policy_change]}
+    read: [diff, task]
+    questions:
+      - {id: authority, q: "Does it alter who may do what, what is checked, or how a verdict is reached?"}
+      - {id: self_adoption, q: "Is anything in this change being used to judge this change? (It must not be.)"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  # ---------------------------------------------------------------- from the CADP library
+  - id: cadp-time-order
+    title: Time, order and atomicity
+    when: {impacts: [stateful_protocol, retry_or_idempotency, concurrency]}
+    read: [diff, task]
+    questions:
+      - {id: preconditions, q: "Is every step's precondition creatable strictly before that step (no bootstrap cycle, no authority before existence)?"}
+      - {id: replay, q: "What happens on replay, a concurrent first write, or a response lost after the effect took place?"}
+      - {id: stale, q: "Can a decision act on a state that changed after it was read (TOCTOU, stale target)?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: cadp-vacuity
+    title: Vacuity and load-bearing controls
+    when: {impacts: [control_changed]}
+    read: [diff, task]
+    questions:
+      - {id: bite, q: "Remove the check: does a prohibited result then appear? If not, the control carries no load."}
+      - {id: vacuous, q: "Can an empty set, a default path or an exemption satisfy the rule without the thing it names?"}
+      - {id: testable, q: "Is the control tested by a case it must reject?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: cadp-planes
+    title: Authority and planes
+    when: {impacts: [plane_boundary]}
+    read: [diff, task, contracts]
+    questions:
+      - {id: vocabulary, q: "Does domain vocabulary enter a layer that should not know the domain?"}
+      - {id: ownership, q: "Does each decision stay with the plane that owns it?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: cadp-spec-impl
+    title: Specification against implementation
+    when: {impacts: [contract_changed, normative_claim]}
+    read: [diff, task, contracts]
+    questions:
+      - {id: enforced, q: "Is every normative claim enforced by something that runs?"}
+      - {id: satisfiable, q: "Can every required piece of evidence be produced by someone authorised to produce it?"}
+      - {id: observation, q: "Where an execution shows something the document does not, is the difference explained — not discarded because the document ranks higher?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: cadp-attestation
+    title: Attestation honesty
+    when: {impacts: [evidence_record, review_record]}
+    read: [diff, task]
+    questions:
+      - {id: self, q: "Does anyone attest to their own work, or review their own attestation?"}
+      - {id: complete, q: "Is the attestation complete, and is nothing a self-report promoted to evidence?"}
+      - {id: wording, q: "Do 'always / never / exactly once' survive crash, replay and concurrency — or are they reworded to what holds?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: cadp-lossy-observation
+    title: Lossy observation
+    when: {impacts: [judge_input, control_changed]}
+    read: [diff, task]
+    questions:
+      - {id: whole, q: "Does the gate, reviewer or verifier see the whole subject — and where do truncated, projected or renamed parts go?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: cadp-instruction-plane
+    title: Instruction and evidence plane separation
+    when: {impacts: [judge_input, policy_change]}
+    read: [diff, task]
+    questions:
+      - {id: untrusted, q: "Can untrusted content reach a judge as its instructions, its working directory, or a trusted path (auto-loaded files, symlinks)?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: cadp-equivalence
+    title: Capability surface against guarantee
+    when: {impacts: [equivalence_claim]}
+    read: [diff, task]
+    questions:
+      - {id: guarantee, q: "Where the change claims X already provides what Y did, is the guarantee shown — not only the feature?"}
+    submit: [basis.kind, basis.ref, claim, evidence]

@@ -1,0 +1,24 @@
+# devflow — one development workflow for every project, configured per project.
+#
+# 준비 → 구현 → 검증·리뷰 → 통합·출시 → 완료 (개발 범용 워크플로 v0.1). What is common lives here;
+# what is one project's — its official criteria, its change classes, its checks, its shared
+# generated artifacts, its extra review lenses — lives in that project's repository as a policy
+# file and a hook (.devflow/), read at the canonical commit, and the project is registered in
+# config/devflow/projects/<name>.yaml. Nothing in this package names a project.
+#
+# The execution profile (`profile`, config/profiles/) says which provider may run a model review
+# and under which quota. The project policy says what the work must satisfy. Neither decides the
+# other.
+name: devflow
+version: 0.1.0
+description: Development workflow — evaluate a task on GitHub, review it, judge it, integrate it
+workflows:
+  devflow: devflow.yaml
+requires:
+  # egress: the remote (GitHub) and the model providers. tool_rights: a model review writes its
+  # file through Preloop under the reviewer principal. Admission is deliberately not required at
+  # start: whether a run needs a model is known only after evaluate, and a router HOLD then means
+  # "no model review in this run" (the reviews stay missing and the state says so) — not a refusal
+  # of a run that may need no model at all.
+  capabilities: [tool_rights, egress]
+  principals: [devflow-reviewer]

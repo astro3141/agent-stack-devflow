@@ -1,0 +1,4 @@
+# Compiled steps are rebuilt on every run inside the agent container; tracking them makes
+# `scripts/packages.sh verify` report the package as edited (agent-stack OPERATIONS §37).
+__pycache__/
+*.pyc
