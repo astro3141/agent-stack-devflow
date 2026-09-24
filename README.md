@@ -95,6 +95,37 @@ or `run_workflow.py show <id>` for the run itself.
 start a new run: every step re-reads the remote, and `integrate` / `publish` ask the remote before
 acting, so nothing is done twice.
 
+## Review settings a project chooses (`reviews:` in its policy)
+
+| key | default | what it does |
+|---|---|---|
+| `assignment` | `together` | `per_lens`: one model reviewer per lens, each reading only its lens's `read` list. A time and cost choice — one reviewer carrying four lenses with contracts and implementation ran past a 600 s profile limit (measured) |
+| `retries` | `0` | a model reviewer that failed or timed out (never one that was denied) runs again, through the platform's member retry; every attempt counts against `budget.model_calls` |
+| `budget.model_calls` | `6` | model calls per task, across its runs; when spent, assignments go to a person |
+| `independent_for`, `independent_by` | `[FOUNDATION]`, `[model, human]` | which change classes need a reviewer separate from every implementer identity, principal and session, and who may be that reviewer |
+| `max_file_bytes` | `60000` | the largest material shown; anything larger is named in `not_shown` and its lens stays unverified |
+
+A review separates **`unverified`** — a question of its lens it could not answer from the materials;
+the lens stays open — from **`limits`** — how far an answer reaches, e.g. relying on a result in
+`checks.json`; shown, never a gap.
+
+## A first real item (infra-scanner-io SRV-174, 2026-09-25)
+
+Run through the live runner on the real trees (#13 + #14 as if merged, #15 on top), their real CI
+(8/8, including the container smoke and the trace-quote test) and real model reviews. Four runs, each
+exposing something the fixtures could not:
+
+1. every machine check PASS, **undecided** — the reviewer could not verify what its materials lacked
+   (the official workbook, the resolver and collector code, any execution result) → checks.json and an
+   `implementation` material kind; trace quotes proven against the official files in CI;
+2. **undecided** — one reviewer carrying every lens timed out at 600 s → `assignment: per_lens`;
+3. **REQUEST_CHANGES** from one reviewer, caused by the trial's own fixture omitting `items/_raw_*` (a
+   lossy observation — the reviewer was right about what it was shown); one reviewer timed out →
+   `retries`; honest reviewers could never complete → `unverified` vs `limits`;
+4. **NEEDS_DECISION**, no blocking finding: the criteria-trace reviewer asks a person to decide — the
+   official 판단방법 is `ps -ef | grep named`, which the service_state process channel cannot observe;
+   an enabled-but-stopped unit reads REVIEW; absence reads NA; scope is BIND only. Posted on the task.
+
 ## Evidence rules the controls pin
 
 `controls.py` (87 controls, fixture remotes, no model, no network) drives the real steps:
