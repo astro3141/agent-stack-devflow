@@ -638,6 +638,9 @@ def controls_evidence():
         check("its prompt is frozen with the new head and names only the materials",
               (os.path.isfile(ev["assignments"][0]["prompt"]), ev["frame"]["head_sha"] in open(ev["assignments"][0]["prompt"]).read()),
               (True, True))
+        mat = json.load(open(os.path.join(r3["ws"], "devflow", "materials", "checks.json")))
+        check("the reviewer is given the check results of exactly that head",
+              (mat["head_sha"], sorted(mat["results"])), (new, sorted(build.CHECKS)))
     finally:
         s.close()
 

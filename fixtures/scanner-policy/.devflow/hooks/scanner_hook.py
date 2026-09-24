@@ -255,19 +255,31 @@ def artifact_ops(doc):
 
 # ------------------------------------------------------------------------------ materials
 def materials(doc):
+    """What a reviewer reads besides the diff. The official PDF / xlsx are binary; what stands in
+    for them is the extract BASELINE_MANIFEST.md records as equivalent to the current file (and, in
+    CI, tests/test_devflow_trace_quotes.py proving each trace quote is in the official file) — an
+    extract is never authority by itself (Profile §2)."""
     task = doc.get("task") or {}
+    impacts = ((doc.get("classification") or {}).get("impacts")) or {}
     crit = []
     for item in task.get("items") or []:
         if re.fullmatch(r"U-\d{2}", str(item)):
             crit += [f"items/_raw_pdf/{item}.yaml", f"items/kisa/{item}.yaml"]
         elif re.fullmatch(r"SRV-\d{3}", str(item)):
-            crit += [f"items/efin/{item}.yaml"]
+            crit += [f"items/_raw_efin_excel/{item}.yaml", f"items/efin/{item}.yaml"]
     crit.append("docs/baselines/BASELINE_MANIFEST.md")
     # the contracts the policy pins, as text a reviewer can read (the binary criteria are not)
     auth = (doc.get("policy") or {}).get("authority") or {}
     contracts = [p for src in auth.get("contracts") or [] for p in src.get("paths") or []
                  if p.endswith((".md", ".yaml", ".py"))]
-    answer(criteria=crit, contracts=contracts)
+    # the code a verdict of this change runs through: how Evidence is collected and resolved
+    impl = []
+    if any(impacts.get(k) for k in ("item_changed", "contract_changed", "evaluator_changed")):
+        impl += ["evaluator/evaluator.py", "evaluator/binding_resolver.py",
+                 "collector/lib/core.sh", "collector/lib/adapters.sh"]
+    if impacts.get("shared_plan_changed") or impacts.get("builder_changed"):
+        impl += ["scripts/build_submission.py", "evaluator/binding_resolver.py"]
+    answer(criteria=crit, contracts=contracts, implementation=list(dict.fromkeys(impl)))
 
 
 # ------------------------------------------------------------------------------ transaction

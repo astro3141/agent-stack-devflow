@@ -409,8 +409,15 @@ def write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev):
     os.makedirs(m, exist_ok=True)
     limit = int((pol.get("reviews") or {}).get("max_file_bytes") or 60000)
     index = {"diff": [], "task": "task.json", "trace": None, "criteria": [], "contracts": [],
-             "artifact_ops": None, "not_shown": []}
+             "implementation": [], "artifact_ops": None, "checks": "checks.json", "not_shown": []}
     json.dump(task, open(os.path.join(m, "task.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    # what ran on exactly this head, as the remote reports it — so a reviewer judges the tests'
+    # adequacy knowing their results, instead of declaring every execution unverifiable
+    json.dump({"head_sha": pr["head_sha"],
+               "results": (ev.get("checks") or {}).get("results") or {},
+               "note": "check runs on this head as GitHub reports them; a check's own logs and "
+                       "artifacts are linked from the pull request, not copied here"},
+              open(os.path.join(m, "checks.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     for i, f in enumerate(changed["files"]):
         for side, sha in (("base", pr["base_sha"]), ("head", pr["head_sha"])):
             text = rem.file_at(sha, f)
@@ -434,16 +441,19 @@ def write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev):
         json.dump(ev["shared"], open(os.path.join(m, "artifact_ops.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     got = dfcore.run_hook(pol, hook_root, "materials", {"task": task, "changed_files": changed["files"],
                                                         "classification": ev.get("classification")})
-    for kind in ("criteria", "contracts"):
+    # criteria and contracts as the canonical branch holds them; the implementation a verdict runs
+    # through (the hook names it) as the head has it
+    for kind, at in (("criteria", frame["canonical_head"]), ("contracts", frame["canonical_head"]),
+                     ("implementation", pr["head_sha"])):
         for ref in got.get(kind) or []:
-            text = rem.file_at(frame["canonical_head"], ref)
+            text = rem.file_at(at, ref)
             name = f"{kind}/{ref.replace('/', '__')}.txt"
             p = os.path.join(m, name)
             os.makedirs(os.path.dirname(p), exist_ok=True)
             if text is not None and len(text) > limit:
                 index["not_shown"].append({"ref": f"{kind}:{ref}", "bytes": len(text), "limit": limit})
                 text = f"(not shown: {len(text)} bytes exceeds the {limit}-byte material limit)"
-            open(p, "w", encoding="utf-8").write(f"# {ref} @ {frame['canonical_head']}\n" +
+            open(p, "w", encoding="utf-8").write(f"# {ref} @ {at}\n" +
                                                  ("(absent)" if text is None else text))
             index[kind].append(name)
     json.dump(index, open(os.path.join(m, "index.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)

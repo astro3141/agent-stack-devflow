@@ -5,7 +5,7 @@ schema: devflow/lenses@1
 lenses:
   - id: scanner-outcomes
     title: The four non-results, kept apart
-    read: [diff, task, trace, contracts]
+    read: [diff, task, trace, contracts, implementation]
     questions:
       - {id: applicability, q: "Is 'not applicable' reached only from the official applicability condition?"}
       - {id: absence, q: "Is an absent target mapped by what absence means in the official criterion — not by default to PASS or NA?"}

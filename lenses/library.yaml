@@ -29,7 +29,7 @@ schema: devflow/lenses@1
 
 base:
   title: Base review
-  read: [diff, task]
+  read: [diff, task, checks]
   questions:
     - {id: function, q: "Does the change do what the task's completion criteria say — each criterion with evidence, not with a command's exit code?"}
     - {id: boundaries, q: "Are inputs, limits and edge cases at the boundaries handled?"}
