@@ -1,3 +1,3 @@
 snapshot of astro3141/infra-scanner-io .devflow/{project.yaml,lenses.yaml,hooks/scanner_hook.py}
-at e2e76e4 (branch devflow/adopt-workflow, PR #13, base c6bd082)
+at 6ec67ed (branch devflow/adopt-workflow, PR #13, base c6bd082)
 re-copy these three files when the scanner policy changes; fixtures/build.py write regenerates the remotes

@@ -118,7 +118,7 @@ def head_files(base):
     return f
 
 
-CHECKS = ["scanner-quick", "devflow-policy", "scanner-publish", "plan-ops"]
+CHECKS = ["scanner-quick", "devflow-policy", "scanner-publish", "plan-ops", "distro-smoke"]
 
 
 def check_runs(names=CHECKS, conclusion="success", at="2026-09-25T10:00:00Z"):
@@ -184,7 +184,7 @@ def scanner_pass():
         "reviews": {"7": [{"id": 101, "user": "rev-person", "commit_id": h1, "state": "COMMENTED",
                            "body": review_body(h1, LENSES_PASS)}]},
         "statuses": {}, "refs": {},
-        "post_merge_check_runs": check_runs(["scanner-quick", "scanner-publish", "devflow-policy"]),
+        "post_merge_check_runs": check_runs(["scanner-quick", "scanner-publish", "devflow-policy", "distro-smoke"]),
         "features": {"merge_queue": False, "protection": {"rules": [], "classic": False}}}},
         "faults": {}}
 

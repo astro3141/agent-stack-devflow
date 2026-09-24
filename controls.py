@@ -233,7 +233,7 @@ def controls_flow():
     s = Sim(build.scanner_pass())
     try:
         s.edit(lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"],
-                                   build.check_runs(["scanner-quick", "devflow-policy", "plan-ops"])
+                                   build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"])
                                    + build.check_runs(["scanner-publish"], "failure")))
         r = s.run()
         check("a required check FAIL on the head: REQUEST_CHANGES, back to implement",
@@ -288,7 +288,7 @@ def controls_flow():
     # the rework limit (OPERATING_POLICY: one automatic rework) escalates instead of looping
     s = Sim(build.scanner_pass())
     try:
-        fail_publish = build.check_runs(["scanner-quick", "devflow-policy", "plan-ops"]) + build.check_runs(["scanner-publish"], "failure")
+        fail_publish = build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"]) + build.check_runs(["scanner-publish"], "failure")
         s.edit(lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"], fail_publish))
         r1 = s.run()
         new = s.edit(lambda db: build.push_new_head(db))
@@ -307,9 +307,9 @@ def controls_block():
     print("block — a head without complete, passing evidence is never integrated")
     for name, change, want_verdict in (
         ("checks still pending on the head", lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"],
-                                                                  build.check_runs(["scanner-quick", "devflow-policy", "plan-ops"])), None),
+                                                                  build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"])), None),
         ("a required check skipped (NOT_RUN) on the head", lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"],
-                                                                               build.check_runs(["scanner-quick", "devflow-policy", "plan-ops"])
+                                                                               build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"])
                                                                                + build.check_runs(["scanner-publish"], "skipped")), None),
         ("no review at all", lambda db: R(db)["reviews"].__setitem__("7", []), None),
         ("a review that did not answer a lens's questions (unverified, not failed)",
@@ -342,7 +342,7 @@ def controls_block():
     s = Sim(build.scanner_pass())
     try:
         head = R(s.db)["pulls"]["7"]["head_sha"]
-        s.edit(lambda db: set_runs(db, head, build.check_runs(["scanner-quick", "devflow-policy", "plan-ops"])
+        s.edit(lambda db: set_runs(db, head, build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"])
                                    + build.check_runs(["scanner-publish"], "skipped")))
         s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
             {"id": 9, "user": "astro3141", "body": f"/devflow except scanner-publish {head[:12]} runner outage; local build_submission.py log attached"}))
@@ -351,11 +351,11 @@ def controls_block():
               (verdict(r), r["state"]["checks"]["results"]["scanner-publish"]["result"]), ("PASS", "NOT_RUN"))
         s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
             {"id": 10, "user": "impl-bot", "body": f"/devflow except plan-ops {head[:12]} trust me"}))
-        s.edit(lambda db: set_runs(db, head, build.check_runs(["scanner-quick", "devflow-policy", "scanner-publish"])
+        s.edit(lambda db: set_runs(db, head, build.check_runs(["scanner-quick", "devflow-policy", "scanner-publish", "distro-smoke"])
                                    + build.check_runs(["plan-ops"], "skipped")))
         r = s.run()
         check("an implementer cannot except their own check", verdict(r), None)
-        s.edit(lambda db: set_runs(db, head, build.check_runs(["scanner-quick", "devflow-policy", "plan-ops"])
+        s.edit(lambda db: set_runs(db, head, build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"])
                                    + build.check_runs(["scanner-publish"], "failure")))
         r = s.run()
         check("and no exception turns a FAIL into anything but REQUEST_CHANGES", verdict(r), "REQUEST_CHANGES")
@@ -554,7 +554,7 @@ def controls_foundation():
             files2[".issue-orchestrator/rebaseline/3-" + "a" * 40 + ".yaml"] = record
             rr["commits"]["b" * 40] = {"parents": ["a" * 40], "files": files2, "author": "astro3141"}
             rr["branches"][build.CANONICAL] = "b" * 40
-            rr["check_runs"]["b" * 40] = build.check_runs(["scanner-quick", "scanner-publish", "devflow-policy"])
+            rr["check_runs"]["b" * 40] = build.check_runs(["scanner-quick", "scanner-publish", "devflow-policy", "distro-smoke"])
         good = ("foundation_commit: " + "a" * 40 + "\nfoundation_actor: impl-bot\nhuman_approval: {approver: astro3141}\n"
                 "validation_evidence: {validated_sha: " + "a" * 40 + ", exit_code: 0}\n"
                 "independent_review: {reviewer: rev-person, session_id: s-1, reviewed_sha: " + "a" * 40 + ", blocking_findings: []}\n")
@@ -842,7 +842,7 @@ def controls_tool():
     s = Sim(build.scanner_pass())
     try:
         s.edit(lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"],
-                                   build.check_runs(["scanner-quick", "devflow-policy", "plan-ops"])
+                                   build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"])
                                    + build.check_runs(["scanner-publish"], "cancelled")))
         r = s.run()
         check("a cancelled CI job: TOOL_FAILURE, no verdict, waiting on the environment",

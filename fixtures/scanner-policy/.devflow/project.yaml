@@ -119,19 +119,24 @@ paths:
 #   scanner-publish  both guards + build_submission.py + no tracked file changed afterwards
 #   plan-ops         the Plan's operation difference against canonical, recorded as an artifact
 #   devflow-policy   .devflow paths mirror the authority guard
+#   distro-smoke     the built collector in containers of TD's target distributions, per item
+#                    scenario (.github/workflows/distro-smoke.yml, tests/distro/ — PR #14). Container
+#                    evidence, not vm_verified (TD §5.4). Until that workflow is on canonical, this
+#                    check has no runs and a change that needs it stays waiting.
 checks:
   always: [scanner-quick, devflow-policy]
   by_impact:
-    item_changed: [scanner-publish, plan-ops]
-    contract_changed: [scanner-publish, plan-ops]
-    evaluator_changed: [scanner-publish, plan-ops]
+    item_changed: [scanner-publish, plan-ops, distro-smoke]
+    contract_changed: [scanner-publish, plan-ops, distro-smoke]
+    evaluator_changed: [scanner-publish, plan-ops, distro-smoke]
     shared_plan_changed: [scanner-publish, plan-ops]
-    builder_changed: [scanner-publish, plan-ops]
+    builder_changed: [scanner-publish, plan-ops, distro-smoke]
     criterion_changed: [scanner-publish, plan-ops]
 
 post_merge:
-  # on the commit that landed on canonical: the full gate again, and the built submission artifact
-  checks: [scanner-quick, scanner-publish, devflow-policy]
+  # on the commit that landed on canonical: the full gate again, the built submission artifact,
+  # and the container smoke of what landed
+  checks: [scanner-quick, scanner-publish, devflow-policy, distro-smoke]
 
 # Labels on the issue that a person placed as control signals (OPERATING_POLICY "Labels"). devflow
 # never writes labels; it reads these as holds.
