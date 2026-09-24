@@ -372,15 +372,22 @@ def select_lenses(base, lenses, classification):
 
 
 def assign_reviewers(chosen, pol, classification):
-    """Group lenses into reviewer assignments. One reviewer may carry several lenses; a lens that
-    must be independent of the others (Foundation) gets its own assignment."""
+    """Group lenses into reviewer assignments. A lens that must be independent of the others
+    (Foundation) always gets its own assignment. The rest go to one reviewer (`reviews.assignment:
+    together`, the default) or to one reviewer each (`per_lens`), which a project chooses when one
+    reviewer reading every lens's materials does not fit the execution profile's time limit — each
+    reviewer then reads only what its lens lists. The number of reviewers is a cost and time choice,
+    never a claim that more reviewers make a better review."""
     rv = pol.get("reviews") or {}
     independent = set(rv.get("independent_lenses") or [])
     if classification.get("change_class") in (rv.get("independent_for") or ["FOUNDATION"]):
         independent |= set(rv.get("independent_lenses_foundation") or ["foundation"])
     shared = sorted(l for l in chosen if l not in independent)
-    groups = [{"reviewer": "r1", "lenses": shared, "independent": False}] if shared else []
-    for i, l in enumerate(sorted(l for l in chosen if l in independent), 2):
+    if rv.get("assignment") == "per_lens":
+        groups = [{"reviewer": f"r{i}", "lenses": [l], "independent": False} for i, l in enumerate(shared, 1)]
+    else:
+        groups = [{"reviewer": "r1", "lenses": shared, "independent": False}] if shared else []
+    for i, l in enumerate(sorted(l for l in chosen if l in independent), len(groups) + 1):
         groups.append({"reviewer": f"r{i}", "lenses": [l], "independent": True})
     return groups
 

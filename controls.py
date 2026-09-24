@@ -573,10 +573,13 @@ def controls_foundation():
 
 
 # ================================================================================== evidence
-def model_receipt(ws, members, context=None, write=True, stale=False, tamper=False, frame_from=None):
-    """What steps/tasks.py writes for a fan-out: the review file and a receipt naming it."""
+def model_receipt(ws, members=None, context=None, write=True, stale=False, tamper=False, frame_from=None):
+    """What steps/tasks.py writes for a fan-out: the review file and a receipt naming it. Without
+    `members`, one member per model assignment evaluate made — whatever the policy's grouping."""
     ev = json.load(open(os.path.join(ws, "devflow", "evaluation.json")))
     frame = ev["frame"]
+    if members is None:
+        members = {a["reviewer"]: a["lenses"] for a in ev.get("assignments") or [] if a.get("by") == "model"}
     rc = {"context": context or frame["id"], "members": {}}
     for label, lenses in members.items():
         name = f"review_{label}.json"
@@ -615,16 +618,21 @@ def controls_evidence():
         s = Sim(copy.deepcopy(base))
         try:
             r = s.run(review_mode="model",
-                      receipt=lambda ws, kw=kw: model_receipt(ws, {"r1": build.LENSES_PASS}, **kw))
+                      receipt=lambda ws, kw=kw: model_receipt(ws, **kw))
             check(name, verdict(r), want)
         finally:
             s.close()
 
     s = Sim(copy.deepcopy(base))
     try:
-        r = s.run(review_mode="model", receipt=lambda ws: model_receipt(ws, {"r1": build.LENSES_PASS}))
+        r = s.run(review_mode="model", receipt=lambda ws: model_receipt(ws))
         acc = r["state"].get("accepted_reviews") or []
-        check("a model review accepted in a completed run is published with its frame", len(acc), 1)
+        ev0 = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json")))
+        check("per_lens: one model reviewer per lens, each with only its own lens",
+              sorted((a["lenses"][0], len(a["lenses"])) for a in ev0["assignments"]),
+              sorted((l, 1) for l in build.LENSES_PASS))
+        check("each accepted model review is published with its frame",
+              (len(acc), {a["frame_id"] for a in acc} == {ev0["frame"]["id"]}), (len(build.LENSES_PASS), True))
         r2 = s.run(review_mode="model")
         check("the next run on the same frame reuses it without a model call",
               (verdict(r2), r2["evaluate"].get("need_models")), ("PASS", "no"))

@@ -179,7 +179,12 @@ reviews:
   independent_for: [FOUNDATION]
   independent_by: [model, human]
   max_file_bytes: 200000
-  budget: {model_calls: 6}          # per task, across its runs
+  # One model reviewer per lens, each reading only what its lens lists. Measured on SRV-174
+  # (2026-09-25): one reviewer carrying base + criteria-trace + shared-artifact + scanner-outcomes,
+  # with the contracts and the implementation as materials, ran past the execution profile's 600 s
+  # limit and produced nothing. The number of reviewers is a time and cost choice, not a quality one.
+  assignment: per_lens
+  budget: {model_calls: 8}          # per task, across its runs — two rounds of four lenses
 
 loop:
   max_rework: 1                     # OPERATING_POLICY "Rework": automatic rework at most once

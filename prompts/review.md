@@ -18,7 +18,8 @@ written: everything you may use is in the frozen materials below. Judge the chan
 
 {LENSES}
 
-Answer every question of every lens, by its id.
+Answer every question of every lens, by its id. Read the material kinds your lenses list under
+`read`; you need not read the others, and you list in `materials` only what you actually read.
 
 ## Rules
 
