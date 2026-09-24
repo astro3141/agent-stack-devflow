@@ -338,6 +338,18 @@ def controls_block():
     finally:
         s.close()
 
+    # a lens answered with its limits stated is complete: honesty about reach is not a gap
+    s = Sim(build.scanner_pass())
+    try:
+        s.edit(lambda db: (R(db)["reviews"].__setitem__("7", []),
+                           add_review(db, R(db)["pulls"]["7"]["head_sha"],
+                                      limits={"shared-artifact": ["relied on plan-ops PASS in checks.json"]})))
+        r = s.run()
+        check("stated limits (what an answer relied on) do not hold PASS",
+              (verdict(r), r["state"]["reviews"]["unverified"]), ("PASS", {}))
+    finally:
+        s.close()
+
     # an approved exception satisfies a NOT_RUN check on that head only, and never a FAIL
     s = Sim(build.scanner_pass())
     try:

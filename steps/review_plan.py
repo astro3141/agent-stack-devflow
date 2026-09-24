@@ -29,9 +29,14 @@ def main(argv):
     for a in ev.get("assignments") or []:
         if a.get("by") != "model" or not a.get("prompt"):
             continue
-        members.append({"label": a["reviewer"], "steps": [{
+        member = {"label": a["reviewer"], "steps": [{
             "kind": "model", "provider": provider, "login": login, "route": route,
-            "prompt": a["prompt"], "expected": a["expected"], "principal": principal}]})
+            "prompt": a["prompt"], "expected": a["expected"], "principal": principal}]}
+        # a member that did not produce (a failure or a time-out, never a denial) may be run again,
+        # as many times as the project's policy says — the platform counts every attempt
+        if int(a.get("retries") or 0) > 0:
+            member.update(retries=int(a["retries"]), retry_when=["failed"])
+        members.append(member)
     plan = os.path.join(D, "review_plan.json")
     json.dump({"members": members}, open(plan, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps({"status": "OK" if members else "EMPTY", "plan": plan, "members": len(members),

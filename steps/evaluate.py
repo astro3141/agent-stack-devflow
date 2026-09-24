@@ -365,6 +365,7 @@ def main(argv):
     for a in assignments:
         need = [l for l in a["lenses"] if l not in (indep_covered if a["independent"] else covered)]
         a["missing"] = need
+        a["retries"] = int(rv.get("retries") or 0)
         a["by"] = "done" if not need else ("model" if review_mode == "model" else "external")
         if a["by"] == "model" and a["independent"] and "model" not in (rv.get("independent_by") or ["model", "human"]):
             a["by"] = "external"

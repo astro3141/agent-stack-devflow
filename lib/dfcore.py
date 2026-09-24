@@ -441,7 +441,9 @@ def validate_review(r, frame, lens_defs, implementers):
         else:
             complete.append(lid)
     independent = is_independent(who, implementers)
+    # `limits` — how far an answered lens reaches (what it relied on) — is shown, never a gap
     return {"valid": True, "complete": complete, "unverified": unverified,
+            "limits": r.get("limits") or {},
             "independent": independent["independent"], "independence": independent,
             "findings": [f for f in r.get("findings") or []], "verdict": r.get("verdict"),
             "reviewer": who}

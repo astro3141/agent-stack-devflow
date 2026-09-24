@@ -26,9 +26,15 @@ Answer every question of every lens, by its id. Read the material kinds your len
 - A **blocking** finding must point at something checkable: `basis.kind` is one of `criterion`,
   `contract`, `observation`, `test`, `task`, and `basis.ref` names the exact place (file and line,
   clause, check name). A concern you cannot support that way is not blocking.
-- If you could not verify something — a file not shown, a reference you could not open — list it
-  under `unverified` for that lens. Do **not** turn "I could not check X" into a defect, and do not
-  mark the lens as fully answered.
+- Two different things, kept apart:
+  - `unverified` — a question of your lens you **could not answer** from the materials (the material
+    it needs is not there, or not shown). The lens is then not complete. Do **not** turn "I could not
+    check X" into a defect.
+  - `limits` — how far your answer reaches, where you did answer: what you relied on rather than
+    re-derived (a check result in `checks.json`, a document's statement), what lies outside your lens.
+    Stating limits is honest and does not leave the lens incomplete.
+  A result in `checks.json` is evidence that the check ran on this head and how it ended; relying on
+  it is a limit, not an unverified question.
 - Where an execution result (a test outcome, an observed value) disagrees with a document, say so
   and explain it; do not discard the observation because a document ranks higher.
 - `verdict`: `PASS` (no blocking finding), `REQUEST_CHANGES` (a blocking finding against a
@@ -55,7 +61,8 @@ Write exactly one file, `{OUT}`, in the run's workspace (use the file tool), con
      "basis": {"kind": "criterion | contract | observation | test | task", "ref": "<exact place>"},
      "evidence": "<what you saw>"}
   ],
-  "unverified": {"<lens id>": ["<what you could not verify, and why>"]},
+  "unverified": {"<lens id>": ["<a question of the lens you could not answer, and why>"]},
+  "limits": {"<lens id>": ["<what your answer relied on, or does not reach>"]},
   "verdict": "PASS | REQUEST_CHANGES | CONTRACT_GAP | NEEDS_DECISION"
 }
 ```

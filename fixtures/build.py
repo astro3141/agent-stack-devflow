@@ -152,13 +152,14 @@ def basis_of(files):
 
 
 def review_body(head, lenses, reads=("diff", "task", "checks", "trace", "criteria", "contracts", "implementation", "artifact_ops"),
-                verdict="PASS", findings=(), unverified=None, digest=None, basis=None):
+                verdict="PASS", findings=(), unverified=None, digest=None, basis=None, limits=None):
     qs = lens_questions()
     doc = {"head_sha": head, "policy_digest": digest or policy_digest(),
            "basis_digest": basis or basis_of(base_files()), "lenses": list(lenses),
            "materials": [{"ref": r, "read": True} for r in reads],
            "answers": {l: {q: "checked against the materials" for q in qs[l]} for l in lenses},
-           "findings": list(findings), "unverified": unverified or {}, "verdict": verdict}
+           "findings": list(findings), "unverified": unverified or {}, "limits": limits or {},
+           "verdict": verdict}
     return "Review.\n\n```devflow-review\n" + json.dumps(doc, ensure_ascii=False, indent=1) + "\n```\n"
 
 
