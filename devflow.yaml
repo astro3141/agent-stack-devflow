@@ -8,6 +8,7 @@
 #   adjudicate ─▶ act ─prepare/implement─▶ route_impl ─ROUTE─▶ work ─▶ prepare_agent ─▶ proceed ─┐
 #                  │                                            └──────▶ implement_agent ◀──────┤
 #                  │                                                          └─▶ deliver ◀──────┘
+#                  ├─research (task types in implement.modes)─▶ route_impl ─▶ work ─▶ research_agent ─▶ deliver
 #                  ├─rebase──────────────────────────────────────▶ work ─────▶ deliver ─┐
 #                  ├─PASS on head / done─▶ integrate ────────────────────────────────────┤
 #                  └───────────────────────────────────────────────────────────────────▶ publish ─▶ record ─▶ ended_*
@@ -17,6 +18,12 @@
 # steps run as the principal devflow-implementer; what they wrote is checked against the canonical
 # rules, the project's generators run, and one commit is pushed to devflow/<task id> — which ends
 # the pass, waiting for CI on that head. The next pass (devflow-auto starts it) judges it.
+#
+# Research is a lane of its own: a task whose type the project routes to `implement.modes`
+# (research, survey) is one model step as devflow-researcher — the only devflow role with web hosts
+# (agent-stack §48) — writing a record into the project's research directory and nothing else. It is
+# reviewed and merged like any change; item tasks then build on the merged records, and their
+# implementer (egress: providers only) fetches nothing itself.
 #
 # Every edge is decided deterministically from a step's output (no model chooses a route).
 workflow:
@@ -166,7 +173,7 @@ agents:
       error: {type: string}
     routes:
       - to: route_impl
-        when: "{{ act.output.do in ['prepare', 'implement'] }}"
+        when: "{{ act.output.do in ['prepare', 'implement', 'research'] }}"
       - to: work
         when: "{{ act.output.do == 'rebase' }}"
       - to: integrate
@@ -204,6 +211,7 @@ agents:
       workspace: {type: string}
       prompt_prepare: {type: string}
       prompt_implement: {type: string}
+      prompt_research: {type: string}
       round: {type: number}
       error: {type: string}
     routes:
@@ -211,13 +219,33 @@ agents:
         when: "{{ work.output.status == 'OK' and work.output.stage == 'prepare' }}"
       - to: implement_agent
         when: "{{ work.output.status == 'OK' and work.output.stage == 'implement' }}"
+      - to: research_agent
+        when: "{{ work.output.status == 'OK' and work.output.stage == 'research' }}"
       - to: deliver
         when: "{{ work.output.status == 'OK' and work.output.stage == 'rebase' }}"
       - to: publish
 
+  - name: research_agent
+    type: script
+    description: 리서치 레인 — a research or survey record, as devflow-researcher (its own hosts, agent-stack §48)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
+           "{{ route_impl.output.model_route }}", "research", "{{ work.output.prompt_research }}",
+           "devflow/research.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
+           "devflow-researcher"]
+    timeout: 3700
+    output:
+      status: {type: string}
+      produced: {type: boolean}
+      provider: {type: string}
+      run_id: {type: string}
+      failure: {type: string}
+    routes:
+      - to: deliver
+
   - name: prepare_agent
     type: script
-    description: 준비 — criteria mapping, research record and trace, as devflow-implementer
+    description: 준비 — the criteria mapping and trace, from the research records, as devflow-implementer
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
            "{{ route_impl.output.model_route }}", "prepare", "{{ work.output.prompt_prepare }}",
@@ -272,7 +300,9 @@ agents:
            "{% if prepare_agent is defined %}{{ prepare_agent.output.produced }}{% endif %}",
            "{% if prepare_agent is defined %}{{ prepare_agent.output.run_id }}{% endif %}",
            "{% if implement_agent is defined %}{{ implement_agent.output.produced }}{% endif %}",
-           "{% if implement_agent is defined %}{{ implement_agent.output.run_id }}{% endif %}"]
+           "{% if implement_agent is defined %}{{ implement_agent.output.run_id }}{% endif %}",
+           "{% if research_agent is defined %}{{ research_agent.output.produced }}{% endif %}",
+           "{% if research_agent is defined %}{{ research_agent.output.run_id }}{% endif %}"]
     timeout: 1500
     output:
       status: {type: string}

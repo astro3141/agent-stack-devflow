@@ -16,9 +16,10 @@ workflows:
   devflow: devflow.yaml            # one pass over a task: judge it, and act on it when devflow may
   devflow-auto: devflow-auto.yaml  # passes, one after another, until a person or CI has the next move
 requires:
-  # The hosts this package reaches, declared so the allowlist can be read back (agent-stack
+  # The hosts this package's scripts reach, declared so the allowlist can be read back (agent-stack
   # OPERATIONS §45). Declaring does not open them: the allowlist is the operator's file and it is
-  # shared, so anything opened here is reachable by every other package too.
+  # shared, so anything opened here is reachable by every other package too. Script steps do not run
+  # as a role; the research hosts are the researcher role's (principals.yaml, §48), not these.
   egress:
     - github.com
     - api.github.com
@@ -29,7 +30,7 @@ requires:
   # "no model review in this run" (the reviews stay missing and the state says so) — not a refusal
   # of a run that may need no model at all.
   capabilities: [tool_rights, egress]
-  principals: [devflow-reviewer, devflow-implementer]
+  principals: [devflow-reviewer, devflow-implementer, devflow-researcher]
   # What this package needs in the environment, declared so the operator is told before a run
   # instead of by a step's error several minutes in. Names and purposes only: the value is the
   # operator's, it arrives from a git-ignored file on the host, and nothing here ever reads it

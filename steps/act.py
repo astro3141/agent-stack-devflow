@@ -11,6 +11,9 @@ changes nothing on the remote. Prints `do`:
              head's checks) and the pull request is devflow's own: fix what the blockers name
   rebase     the change is not on the latest canonical head of a shared generated artifact: bring
              it there and regenerate — no model
+  research   a task type the project routes to a lane of its own (`implement.modes`, e.g. research
+             and survey): one model step as devflow-researcher writes a research record, first time
+             and on rework alike
   none       anything else: a person, CI or a reviewer has the next move, or the project does not
              let devflow implement (policy `implement.by`), or the task says a person implements it
 
@@ -55,6 +58,12 @@ def decide(st, ev):
     if rounds >= cap:
         return "none", f"devflow has started {rounds} implementation round(s) for this task (implement.max_rounds {cap})"
     pr = st.get("pr")
+    modes = impl.get("modes") or {}
+    if task.get("type") in modes:
+        if pr and (pr.get("head_ref") != dfcore.task_branch(task)
+                   or not (ev.get("implementers") or {}).get("devflow_only")):
+            return "none", "the pull request holds commits devflow did not push: its author continues it"
+        return "research", f"a {task['type']} task: the research lane"
     if pr and hist.get("manual_until_new_head") == pr.get("head_sha"):
         return "none", "an earlier round found what only a person can resolve on this head"
     if not pr:

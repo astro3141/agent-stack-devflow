@@ -1,6 +1,6 @@
 """devflow step: set up the implementer's workspace for this round.
 
-usage: work.py <project> <do>          do: prepare | implement | rebase (act.py)
+usage: work.py <project> <do>          do: prepare | implement | rebase | research (act.py)
 
 Writes, under /ws/<run>/:
 
@@ -144,6 +144,41 @@ def feedback(rem, st, ev):
             "reviews": st.get("reviews") or {}, "previous_round": (st.get("history") or {}).get("last_delivery")}
 
 
+def research_dir(impl):
+    """Where the project keeps research records: the directory its research lane writes."""
+    for m in (impl.get("modes") or {}).values():
+        for w in m.get("writes") or []:
+            return w.rstrip("/*") + "/"
+    return ""
+
+
+def records(rdir):
+    """The research records already on the tree the model starts from."""
+    root = os.path.join(REPO, rdir) if rdir else ""
+    if not root or not os.path.isdir(root):
+        return "(none yet)"
+    out = []
+    for d, _, files in os.walk(root):
+        for f in sorted(files):
+            out.append("- " + os.path.relpath(os.path.join(d, f), REPO).replace(os.sep, "/"))
+    return "\n".join(out) or "(none yet)"
+
+
+def web_hosts(role):
+    """The hosts a role may fetch from (its `egress:` in this package's principals.yaml,
+    agent-stack §48) — told to the model, so it does not spend its time on pages the network
+    refuses (measured: a preparation tried package mirrors no list had open)."""
+    try:
+        import yaml
+        doc = yaml.safe_load(open(os.path.join(PKG, "principals.yaml"), encoding="utf-8")) or {}
+        hosts = ((doc.get("principals") or {}).get(role) or {}).get("egress")
+    except Exception:
+        hosts = None
+    if hosts is None:
+        return "whatever the stack's shared allowlist holds open"
+    return ", ".join(hosts) if hosts else "none (the providers only)"
+
+
 def fill(tpl, values):
     for k, v in values.items():
         tpl = tpl.replace("{" + k + "}", v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, indent=1))
@@ -179,6 +214,10 @@ def main(argv):
     elif do == "implement":
         work.update(base=pr["head_sha"], parent=pr["head_sha"], extra_parents=[])
         copy_tree(cached_tree(rem, pr["head_sha"]), REPO)
+    elif do == "research":
+        at = pr["head_sha"] if pr else canonical
+        work.update(base=at, parent=at, extra_parents=[], new_branch=not pr, mode=task.get("type"))
+        copy_tree(cached_tree(rem, at), REPO)
     elif do == "rebase":
         # canonical's tree plus the change: every file the change touched, as the change has it,
         # except the generated ones (they are regenerated). A file canonical also changed since
@@ -217,7 +256,8 @@ def main(argv):
                 os.remove(dst)
             work["brought"].append(f)
         json.dump(work, open(os.path.join(D, "work.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        emit(status="OK", stage=do, workspace=WS, prompt_prepare="", prompt_implement="", round=work["round"])
+        emit(status="OK", stage=do, workspace=WS, prompt_prepare="", prompt_implement="", prompt_research="",
+             round=work["round"])
         return 0
     else:
         emit(status="TOOL_FAILURE", stage=do, workspace=WS, error=f"unknown stage {do!r}")
@@ -234,7 +274,12 @@ def main(argv):
     for kind in ("prepare", "implement"):
         p = (impl.get("instructions") or {}).get(kind)
         instr[kind] = (rem.file_at(canonical, p) if p else None) or "(the project gives no further instructions)"
-    fb = feedback(rem, st, ev) if do == "implement" else None
+    for kind, m in (impl.get("modes") or {}).items():
+        p = m.get("instructions")
+        instr[kind] = (rem.file_at(canonical, p) if p and kind == task.get("type") else None) or "(the project gives no further instructions)"
+    fb = feedback(rem, st, ev) if (do == "implement" or (do == "research" and pr)) else None
+    mode = (impl.get("modes") or {}).get(task.get("type")) or {}
+    rdir = research_dir(impl)
     values = {"TASK": task, "REPO": REPO, "WS": WS, "BRANCH": branch, "CANONICAL": canonical,
               "CANONICAL_BRANCH": reg["canonical_branch"], "TRACE_PATH": trace_path,
               "RESEARCH_PATH": research_path,
@@ -244,12 +289,18 @@ def main(argv):
               "GENERATED": list(impl.get("generated") or []),
               "REGENERATE": [" ".join(c) for c in impl.get("regenerate") or []],
               "FEEDBACK": fb or {}, "CLASSIFICATION": ev.get("classification") or {},
+              "WEB_HOSTS": web_hosts(dfcore.RESEARCHER if do == "research" else dfcore.IMPLEMENTER),
+              "RESEARCH_DIR": rdir or "(the project keeps no research records)",
+              "RESEARCH_RECORDS": records(rdir),
+              "RECORD_PATH": str(mode.get("path") or "docs/research/{task}.md").format(task=task["id"].lower()),
+              "WRITES": list(mode.get("writes") or []),
               "CRITERIA": "\n".join([f"- {p}" for p in crit_files] + [f"- note: {n}" for n in crit_notes]) or "(none)"}
     prompts = {}
-    for kind in (["prepare", "implement"] if do == "prepare" else ["implement"]):
+    kinds = ["prepare", "implement"] if do == "prepare" else ([task["type"]] if do == "research" else ["implement"])
+    for kind in kinds:
         tpl = open(os.path.join(PKG, "prompts", f"{kind}.md"), encoding="utf-8").read()
-        body = fill(tpl, {**values, "PROJECT_INSTRUCTIONS": instr[kind],
-                          "OUT": os.path.join(D, f"{kind}.json")})
+        out = "research.json" if do == "research" else f"{kind}.json"
+        body = fill(tpl, {**values, "PROJECT_INSTRUCTIONS": instr[kind], "OUT": os.path.join(D, out)})
         p = os.path.join(D, f"prompt_{kind}.md")
         open(p, "w", encoding="utf-8").write(body)
         prompts[kind] = p
@@ -257,7 +308,8 @@ def main(argv):
         json.dump(fb, open(os.path.join(D, "feedback.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     json.dump(work, open(os.path.join(D, "work.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     emit(status="OK", stage=do, workspace=WS, prompt_prepare=prompts.get("prepare", ""),
-         prompt_implement=prompts.get("implement", ""), round=work["round"])
+         prompt_implement=prompts.get("implement", ""),
+         prompt_research=prompts.get(task.get("type"), "") if do == "research" else "", round=work["round"])
     return 0
 
 

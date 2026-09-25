@@ -25,6 +25,10 @@ Classification the project's rules gave it:
 - The official criterion's own words for this task, read from the official files by the project's
   hook (they are the criterion, not an extract of it):
 {CRITERIA}
+- Research records the task builds on (reviewed facts about the systems it runs on, with sources):
+{RESEARCH_RECORDS}
+  You cannot fetch web pages. A fact the change needs that no record establishes goes into
+  `not_done` as "research needed: <topic> — <the question>"; it is not guessed.
 - Reference material (read-only, never to be run or copied as code):
 {REFERENCES}
 

@@ -43,6 +43,9 @@ STATE_RE = re.compile(r"<!-- devflow:state (\{.*?\}) -->", re.S)
 IMPLEMENTER = "devflow-implementer"
 IMPLEMENTER_EMAIL = "devflow-implementer@devflow.invalid"
 IMPLEMENTER_AUTHORS = {IMPLEMENTER, IMPLEMENTER_EMAIL}
+# The research lane's role (task types a project routes to `implement.modes`). Its commits carry the
+# same author as the implementer's: both are devflow's own, recorded as pushed.
+RESEARCHER = "devflow-researcher"
 PR_MARK = "<!-- devflow:pr"
 
 

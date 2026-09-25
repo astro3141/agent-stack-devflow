@@ -24,7 +24,7 @@ complete, uses the scanner's real state names, keeps the four non-results apart,
 present a provisional reading as official. Whether the reading is right is the criteria-trace
 review's question; a filled-in form is not a checked one.
 """
-import fnmatch, json, re, sys
+import fnmatch, json, os, re, sys
 
 PROTOCOL = "devflow-hook@1"
 
@@ -110,6 +110,12 @@ def classify(doc):
             problems.append("a criterion correction lists the items whose results change (affected_items)")
     if task.get("type") == "docs" and semantic:
         violations.append("declared as a docs task, but files that change the scanner's meaning are in the diff")
+    # research and survey tasks write research records and nothing else — whoever writes them
+    if task.get("type") in ("research", "survey"):
+        outside = [f for f in files if not under(f, P.get("research", ["docs/research"]))]
+        if outside:
+            violations.append(f"a {task.get('type')} task writes only research records "
+                              f"({P.get('research', ['docs/research'])}), not {outside[:6]}")
 
     na = {}
     if not semantic and not impacts.get("builder_changed") and not impacts.get("shared_plan_changed"):
@@ -317,8 +323,98 @@ def transaction_evidence(doc):
     answer(valid=not p, problems=p, reviewer=rv.get("reviewer"), actor=r.get("foundation_actor"))
 
 
+def _col(n):
+    s = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def _col_index(col):
+    return sum((ord(ch) - 64) * 26 ** i for i, ch in enumerate(reversed(col)))
+
+
+def _xlsx_rows(path):
+    """Every sheet of a workbook as (sheet, [rows of cell strings]) — the standard library only
+    (a workbook is a zip of XML), so it runs where openpyxl is not installed."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    m = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    rid = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+    z = zipfile.ZipFile(path)
+    shared = []
+    if "xl/sharedStrings.xml" in z.namelist():
+        for si in ET.fromstring(z.read("xl/sharedStrings.xml")).findall(f"{m}si"):
+            shared.append("".join(t.text or "" for t in si.iter(f"{m}t")))
+    rels = {r.get("Id"): r.get("Target") for r in ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))}
+    for s in ET.fromstring(z.read("xl/workbook.xml")).find(f"{m}sheets"):
+        target = rels[s.get(rid)].lstrip("/")
+        target = target if target.startswith("xl/") else "xl/" + target
+        rows = []
+        for row in ET.fromstring(z.read(target)).iter(f"{m}row"):
+            cells = {}
+            for c in row.findall(f"{m}c"):
+                col = "".join(ch for ch in c.get("r", "") if ch.isalpha())
+                v = c.find(f"{m}v")
+                if c.get("t") == "s" and v is not None:
+                    text = shared[int(v.text)]
+                elif c.get("t") == "inlineStr":
+                    text = "".join(t.text or "" for t in c.iter(f"{m}t"))
+                else:
+                    text = v.text if v is not None else ""
+                cells[col] = text or ""
+            width = max([_col_index(k) for k in cells] or [0])
+            rows.append([cells.get(_col(i), "") for i in range(1, width + 1)])
+        yield s.get("name"), rows
+
+
+def criteria_text(doc):
+    """The official criterion's own words for the task's items, read from the official files in the
+    checkout devflow's implementer works in — so preparation quotes the criterion, not an extract.
+
+    EFIN: the item's row in the workbook, every column with its header. KISA: the PDF has no
+    standard-library reader; say so, and point at the extract (auxiliary) and the CI test that
+    compares every trace quote with the PDF page itself."""
+    pol, task, root = doc["policy"], doc.get("task") or {}, doc.get("repo_dir") or "."
+    items = [str(i) for i in task.get("items") or []]
+    files, notes = {}, []
+    for c in (pol.get("authority") or {}).get("criteria") or []:
+        for p in c.get("paths") or []:
+            full = os.path.join(root, p)
+            if not p.endswith(".xlsx"):
+                notes.append(f"{c['id']}: {p} is not readable here (no PDF reader in this runtime); use "
+                             "items/_raw_pdf/ to find the page, and quote the PDF's words — "
+                             "tests/test_devflow_trace_quotes.py checks each quote against the PDF itself")
+                continue
+            if not os.path.isfile(full):
+                notes.append(f"{c['id']}: {p} is not in the checkout")
+                continue
+            try:
+                for sheet, rows in _xlsx_rows(full):
+                    header = next((r for r in rows if "평가항목ID" in [x.strip() for x in r]), None)
+                    if header is None:
+                        continue
+                    at = [x.strip() for x in header].index("평가항목ID")
+                    for r in rows:
+                        if not (len(r) > at and r[at].strip() in items):
+                            continue
+                        lines = [f"# {c['id']} — {p}", f"# sheet {sheet!r}, the row whose 평가항목ID is {r[at].strip()}", ""]
+                        for i, v in enumerate(r):
+                            if str(v).strip():
+                                h = (header[i] if header and i < len(header) and header[i] else _col(i + 1))
+                                lines.append(f"## {h.replace(chr(10), ' ')}\n{v}\n")
+                        files[f"{c['id']}__{r[at].strip()}.md"] = "\n".join(lines)
+            except Exception as e:
+                notes.append(f"{c['id']}: {p} could not be read: {type(e).__name__}: {e}")
+    missing = [i for i in items if not any(f.endswith(f"__{i}.md") for f in files)]
+    if missing:
+        notes.append(f"no row for {missing} in the official workbooks read here")
+    answer(files=files, notes=notes)
+
+
 OPS = {"classify": classify, "validate_trace": validate_trace, "artifact_ops": artifact_ops,
-       "materials": materials, "transaction_evidence": transaction_evidence}
+       "materials": materials, "transaction_evidence": transaction_evidence, "criteria_text": criteria_text}
 
 if __name__ == "__main__":
     try:

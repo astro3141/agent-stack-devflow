@@ -44,7 +44,7 @@ defaults:
   end_point: integration            # canonical 통합 후 최종 검증·적용 생성물 확인 (Profile §1)
 
 # 작업 유형 · 변경 클래스 · 영향 표시 (Profile §3; 설정표 §1)
-task_types: [feature, bug, refactor, dependency, docs, build]
+task_types: [feature, bug, refactor, dependency, docs, build, research, survey]
 change_classes: [ORDINARY, FOUNDATION, CRITERION_CORRECTION]
 impact_flags: [item_changed, contract_changed, evaluator_changed, shared_plan_changed, builder_changed, criterion_changed]
 
@@ -113,6 +113,7 @@ paths:
   builder: [scripts/build_submission.py, run_submission_tests.sh, scripts/run_mutation_checks.py]
   shared_plan: [collection-plan.tsv, dist/collection-plan.tsv, dist/infra-collector.sh]
   criteria_sources: [docs/baselines]
+  research: [docs/research]           # research records (the research lane's; facts with sources, never criteria)
   count_assertions: ["tests/test_u43_nis.py", "tests/test_u54_ftp.py", "tests/test_collection_plan_*.py"]
 
 # Checks — the GitHub Actions job names in .github/workflows/devflow-ci.yml.
@@ -212,7 +213,21 @@ implement:
   instructions:
     prepare: .devflow/instructions/prepare.md
     implement: .devflow/instructions/implement.md
-  research_path: ".devflow/tasks/{task}.research.md"
+  research_path: ".devflow/tasks/{task}.research.md"   # what an item task relies on, and from where
+  # Research is a lane of its own (Notion 준비 split in two, 2026-09-25): facts about the systems the
+  # scanner runs on are established once per topic, reviewed and merged under docs/research/, and
+  # item tasks build on them. A survey maps a set of items onto the contracts first, so shared
+  # contract gaps (Foundation), shared decisions and the research topics are found before any item
+  # is implemented. Both run as devflow-researcher, the one devflow role with web hosts.
+  modes:
+    research:
+      instructions: .devflow/instructions/research.md
+      writes: [docs/research/]
+      path: "docs/research/{task}.md"
+    survey:
+      instructions: .devflow/instructions/survey.md
+      writes: [docs/research/]
+      path: "docs/research/{task}.md"
   # the Plan, the dist collector and the acceptance manifest, from the bindings — the part of
   # scripts/build_submission.py that writes tracked files. The whole Builder (ZIP, self-test,
   # ShellCheck) is the CI job scanner-publish, which also fails when a tracked file differs.

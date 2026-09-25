@@ -25,9 +25,14 @@ Classification the project's rules gave it so far:
 {CRITERIA}
 - Reference material the project names (read-only, never to be run or copied as code):
 {REFERENCES}
-- You may also search the web and fetch pages, for facts about operating systems and products
-  (package names, service and unit names, default paths, version differences). Prefer primary
-  sources: the vendor's or distribution's own documentation and package file lists.
+- Research records — facts about the systems this runs on (package names, service and unit names,
+  process names, default paths, differences between distributions), each with its source, written
+  by the research lane and reviewed. Build on them and cite them:
+{RESEARCH_RECORDS}
+  You cannot fetch web pages ({WEB_HOSTS}). A fact the mapping needs that no record establishes is
+  not guessed and not looked up here: it goes into `decisions` as "research needed: <topic> —
+  <the question>", and preparation stops there, so the research lane answers it once for every
+  item that needs it.
 
 ## What the project asks of preparation
 
@@ -39,12 +44,11 @@ Classification the project's rules gave it so far:
    `{REPO}/.devflow/templates/` gives. Every mapping carries its confirmation state honestly:
    `confirmed` only when you compared the official source's own text for it; otherwise
    `provisional` or `unresolved`, with what is missing.
-2. `{REPO}/{RESEARCH_PATH}` — the research record: one line per claim you rely on, each with
-   its source (URL and the date you read it, or a reference file and line), whether that source is
-   primary, what it applies to (distribution, version), and how it will be verified (a test or
-   scenario name, or "not verified"). Say where the reference material and the current sources
-   disagree, and which you follow and why. Reference material is evidence of how something was
-   collected before; it is never the criterion.
+2. `{REPO}/{RESEARCH_PATH}` — what this task relies on: each fact, and the research record (and
+   line) it comes from, or the repository file it was read from; and how each will be verified (a
+   test or scenario name, or "not verified"). Where reference material observes something the
+   mapping does not, say so and whether it matters. Reference material is evidence of how something
+   was collected before; it is never the criterion.
 3. `{OUT}` — JSON:
 
 ```json

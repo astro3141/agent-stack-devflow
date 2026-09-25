@@ -9,6 +9,12 @@
 # who implemented the change; a different model or vendor is never counted as independence.
 principals:
   devflow-reviewer:
+    # No `egress:` on purpose (agent-stack §48). Declaring it — even `egress: []`, "the providers and
+    # nothing else" — runs a review as this role's own uid behind its own proxy, and the Codex CLI
+    # cannot run under a uid other than the one that installed it: the step is refused by name.
+    # Reviews route over claude and codex (research-default), so declaring it here would refuse the
+    # codex lanes. A reviewer reads frozen materials and has no web tool without asking, so what the
+    # shared list holds open is not something its work uses.
     description: >
       devflow's model reviewer. Reads the frozen review materials; writes only its own review file.
     tool_rules:
@@ -28,6 +34,12 @@ principals:
           rule_description: a reviewer changes nothing it reads
 
   devflow-implementer:
+    # The providers and nothing else (agent-stack §48): the implementer builds on research records
+    # the research lane wrote and a reviewer passed, so it fetches nothing itself — and cannot reach
+    # what the shared list holds open for other packages, GitHub included (devflow's scripts do the
+    # GitHub work). Its steps must run on claude (impl_profile long-task): the Codex CLI cannot run
+    # as a role.
+    egress: []
     description: >
       devflow's implementer. Writes the task's change in the run's checkout (/ws/<run>/repo/) and its
       own report (devflow/prepare.json, devflow/implement.json) — nothing else. Which paths of the
@@ -58,6 +70,47 @@ principals:
           condition_type: simple
           condition_expression: "args.path.contains('/repo/')"
           rule_description: the implementer edits the checkout
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+
+  devflow-researcher:
+    # The research lane's role (task types research and survey). Its hosts are primary sources for
+    # how an operating system packages a product: the distributions' package indexes and their
+    # vendors' documentation. Only WebFetch is held to them — WebSearch runs at the provider, which
+    # no proxy here can limit. Claude only, for the same reason as the implementer.
+    egress:
+      - packages.ubuntu.com
+      - packages.debian.org
+      - dl.rockylinux.org
+      - docs.rockylinux.org
+      - vault.centos.org
+      - access.redhat.com
+      - docs.redhat.com
+    description: >
+      devflow's researcher. Writes the research record in the run's checkout (/ws/<run>/repo/) and its
+      own report (devflow/research.json) — nothing else. Which paths it may change is decided again,
+      by the project's canonical rules, before anything is pushed.
+    tool_rules:
+      write_file:
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/repo/')"
+          rule_description: the researcher writes the checkout
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.endsWith('/devflow/research.json')"
+          rule_description: and its report
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+      edit_file:
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/repo/')"
+          rule_description: the researcher edits the checkout
         - action: deny
           condition_type: simple
           condition_expression: ""

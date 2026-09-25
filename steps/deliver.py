@@ -91,6 +91,8 @@ def main(argv):
     prep_run = argv[3] if len(argv) > 3 else ""
     impl_ok = len(argv) > 4 and argv[4] == "True"
     impl_run = argv[5] if len(argv) > 5 else ""
+    res_ok = len(argv) > 6 and argv[6] == "True"
+    res_run = argv[7] if len(argv) > 7 else ""
     sp = os.path.join(D, "state.json")
     st = json.load(open(sp, encoding="utf-8"))
     ev = json.load(open(os.path.join(D, "evaluation.json"), encoding="utf-8"))
@@ -101,7 +103,7 @@ def main(argv):
     task = ev["task"]
     reg = dfcore.registration(project)
     hist = st.setdefault("history", {})
-    hist["impl_sessions"] = sorted(set(hist.get("impl_sessions") or []) | {r for r in (prep_run, impl_run) if r})
+    hist["impl_sessions"] = sorted(set(hist.get("impl_sessions") or []) | {r for r in (prep_run, impl_run, res_run) if r})
     report = {"stage": stage, "round": work.get("round"), "at": time.time()}
 
     def finish(ok, **kw):
@@ -124,7 +126,10 @@ def main(argv):
 
     prep = read_json(os.path.join(D, "prepare.json")) if prep_ok else None
     done = read_json(os.path.join(D, "implement.json")) if impl_ok else None
-    report["prepare"], report["implement"] = prep, done
+    research = read_json(os.path.join(D, "research.json")) if res_ok else None
+    report["prepare"], report["implement"], report["research"] = prep, done, research
+    if stage == "research":
+        return deliver_research(project, reg, pol, impl, task, ev, st, hist, work, snap, research, report, finish)
     if stage == "prepare" and prep is None:
         return finish(False, failure="preparation produced no prepare.json in this attempt")
     # the same reading as proceed.py: open questions hold the task, whatever `proceed` says
@@ -233,6 +238,84 @@ def main(argv):
                         "owner": "CI", "resume_when": "the required checks complete on that head"})
         st["notes"] = [f"devflow pushed {head[:12]} to {branch} ({kind}, round {work.get('round')})"] + \
                       ([f"generated files regenerated: {sorted(p for p in final if matches(p, gen))}"] if gen else [])
+    st["next"] = st["wait"]["need"]
+    return finish(True)
+
+
+def deliver_research(project, reg, pol, impl, task, ev, st, hist, work, snap, research, report, finish):
+    """The research lane: the record, and nothing else. What it may write is the mode's `writes`
+    (the project's research directory) — anything outside is refused, and so is a change the
+    project's hook calls out of scope. No generator runs: a record changes no generated artifact."""
+    if research is None:
+        return finish(False, failure="the research lane produced no research.json in this attempt")
+    mode = (impl.get("modes") or {}).get(task.get("type")) or {}
+    writes = list(mode.get("writes") or [])
+    changes = diff(snap, tree_map(REPO))
+    if not changes:
+        return finish(False, failure="the research lane changed nothing")
+    outside = sorted(p for p in changes if not matches(p, writes))
+    if outside:
+        return finish(False, failure=f"the research lane wrote outside {writes}: {outside[:8]}")
+    try:
+        cls = dfcore.run_hook(pol, os.path.join(D, "policy"), "classify", {
+            "task": task, "changed_files": sorted(changes), "authors": [dfcore.IMPLEMENTER],
+            "pr": None, "canonical_head": work["canonical"]})
+    except dfcore.HookError as e:
+        return finish(False, failure=f"the project's hook could not classify the change: {e}")
+    if cls.get("violations"):
+        return finish(False, failure=f"the change breaks the project's scope rules: {cls['violations'][:5]}")
+    blobs = {}
+    for p, c in changes.items():
+        full = os.path.join(REPO, p)
+        blobs[p] = None if c == "D" else (open(full, "rb").read(), "100644")
+    report["changes"] = changes
+    title = f"{task['id']}: {task.get('goal', '')}"
+    message = (f"{title}\n\n{task['type']}, round {work.get('round')}.\n\n{research.get('summary') or ''}\n\n"
+               f"Devflow-Task: {task['id']}\nDevflow-Run: {RUN}\n")
+    author = {"name": dfcore.IMPLEMENTER, "email": dfcore.IMPLEMENTER_EMAIL,
+              "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    branch = work["branch"]
+    try:
+        rem = dfcore.open_remote(reg, WS, PROXY)
+        now = rem.branch_head_or_none(branch)
+        expect = None if work.get("new_branch") else work["parent"]
+        if now != expect:
+            return finish(False, failure=f"branch {branch} is at {str(now)[:12]}, not at {str(expect)[:12]}: "
+                                         "someone else moved it; devflow does not overwrite it")
+        head = rem.push_commit(branch, work["parent"], blobs, message, author, base=work["base"])
+        hist["pushed"] = list(hist.get("pushed") or []) + [head]
+        report["head"] = head
+        pr = rem.find_pull(branch)
+        if pr is None:
+            lines = [f"{dfcore.PR_MARK} task={task['id']} issue={task.get('issue')} -->",
+                     f"Task: #{task.get('issue')} — {task.get('goal', '')}", "",
+                     f"A {task['type']} record by devflow's research lane. It records facts with their sources; "
+                     "it decides nothing about the criterion. Agents do not merge.", "",
+                     research.get("summary") or ""]
+            for k in ("decisions", "gaps", "topics"):
+                if research.get(k):
+                    lines += ["", f"**{k}**"] + [f"- {x}" for x in research[k]]
+            try:
+                n = rem.create_pull(branch, reg["canonical_branch"], title, "\n".join(lines))
+            except remote_mod.RemoteError:
+                again = rem.find_pull(branch)
+                if again is None:
+                    raise
+                n = again["number"]
+        else:
+            n = pr["number"]
+        hist["pr"] = n
+        report["pr"] = n
+    except remote_mod.RemoteError as e:
+        report["tool"] = f"{type(e).__name__}: {e}"[:300]
+        st["execution"] = {"status": "TOOL_FAILURE", "errors": list((st.get("execution") or {}).get("errors") or []) + [report["tool"]]}
+        return finish(False, failure=f"the remote refused the delivery: {report['tool']}")
+    st["publish_status"] = False
+    st["blockers"] = []
+    st.update(phase="verify_review", verdict=None, progress="waiting",
+              wait={"reason": "verification", "need": f"CI on the new head {head[:12]} (PR #{n})",
+                    "owner": "CI", "resume_when": "the required checks complete on that head"})
+    st["notes"] = [f"devflow pushed {head[:12]} to {branch} ({task['type']} record, round {work.get('round')})"]
     st["next"] = st["wait"]["need"]
     return finish(True)
 

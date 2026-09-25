@@ -61,12 +61,31 @@ record      MLflow, through the platform's recorder: NO_EXECUTION when no model 
 
 A process exit code, a file that exists or a model saying "done" is never evidence by itself.
 
+## Research is a lane of its own
+
+Measured on a real item: preparation spent most of its time finding out how a product is packaged
+on the target distributions — facts every item about that product shares — and its most valuable
+findings (a contract that cannot observe what the criterion names, a question a person must answer)
+reached beyond the item. So a project may route task types to a lane of their own
+(`implement.modes`):
+
+| task type | what the lane writes | why first |
+|---|---|---|
+| `survey` | a set of items mapped onto the contracts: per item the condition and the contract that could express it by meaning; across items the contract gaps (Foundation proposals, with every item they block), the decisions (grouped by question), the research topics, an order | shared gaps and decisions are found once, before items stop on them one by one |
+| `research` | one topic — a product on the target distributions: packages, units, processes, configuration, the variants that change a result, what the collection lane sees of each, what earlier scripts looked at — every fact with its source and date | implementers build on it instead of redoing it |
+
+The lane is one model step as **`devflow-researcher`**, the only devflow role with web hosts of its
+own (agent-stack §48); it may write only the project's research directory (`writes`), and its record
+is reviewed (lens `research-record`) and merged like any change. Item tasks then cite the merged
+records: their implementer is confined to the providers (`egress: []`) and fetches nothing — a fact
+no record establishes stops preparation with "research needed: …".
+
 ## devflow implements (준비 · 구현)
 
 | stage | who | what |
 |---|---|---|
 | `work` | script | the tree to change, fetched from GitHub at the commit the evaluation fixed: canonical's head for a new task, the PR's head for a rework, canonical's head plus the change for a rebase; the project's reference material as UTF-8 text; the project's instructions (`implement.instructions`, read at canonical); for a rework, what sent it back — the blockers and what each failing check said about itself |
-| `prepare_agent` | model, principal `devflow-implementer` | the trace (mappings with honest confirmation states), a research record (each fact with its source; web search and fetch are allowed, the egress list decides where), `prepare.json` with `decisions` and `gaps` |
+| `prepare_agent` | model, principal `devflow-implementer` (providers only) | the trace (mappings with honest confirmation states) built on the research records, a note of which facts it relies on and from where, `prepare.json` with `decisions` and `gaps` |
 | `proceed` | script | implementation starts only when preparation left no question; otherwise its record is pushed so a person sees it, and the task waits for the decision (NEEDS_DECISION / CONTRACT_GAP in preparation). Answering it in the task block changes the task; the next pass prepares again |
 | `implement_agent` | model, `devflow-implementer` | the change and its tests; `implement.json` |
 | `deliver` | script | the canonical rules decide what may leave the workspace — the project's rule paths are refused (the task's own trace and research record excepted), the project's hook classifies the change and its path floor refuses what the class may not touch; the project's generators run (`implement.regenerate`); **one commit** authored `devflow-implementer` on `devflow/<task id>` (created, or fast-forwarded — never forced; a branch someone else moved is left alone); the pull request, opened once |
@@ -184,7 +203,7 @@ exposing something the fixtures could not:
 
 ## Evidence rules the controls pin
 
-`controls.py` (143 controls, fixture remotes, no model, no network) drives the real steps:
+`controls.py` (149 controls, fixture remotes, no model, no network) drives the real steps:
 
 - a review counts only for the head GitHub attaches it to, the head it names, and the policy digest
   it was written under; a new head, a policy change or a criterion change on canonical makes it stale

@@ -43,6 +43,17 @@ base:
 
 lenses:
   # ---------------------------------------------------------------- devflow's own
+  - id: research-record
+    title: A research record others will build on
+    when: {task_types: [research, survey]}
+    read: [diff, task, criteria]
+    questions:
+      - {id: sourced, q: "Does every claim name its source (URL and the date read, or file and line), say whether that source is primary, and say what it applies to (distribution, version, product)?"}
+      - {id: scope, q: "Is what could not be established marked as such — not verified, and why — rather than written as fact or left out?"}
+      - {id: not_criterion, q: "Does the record stay a record of facts: nothing in it decides what passes or fails, and reference material (earlier scripts, extracts) is never presented as a criterion?"}
+      - {id: usable, q: "Can an implementer act on it without redoing the research: the variants that change a result named, and for each how it will be verified?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
   - id: criteria-trace
     title: Official criteria conformance
     when: {impacts: [criterion_changed, item_changed, semantic], change_classes: [CRITERION_CORRECTION]}

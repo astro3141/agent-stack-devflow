@@ -102,17 +102,20 @@ class Sim:
         r["adjudicate"] = step("adjudicate.py", [""], env)
         r["act"] = step("act.py", [], env)
         do = r["act"].get("do")
-        if do in ("prepare", "implement", "rebase"):
+        if do in ("prepare", "implement", "rebase", "research"):
             r["work"] = step("work.py", [project, do], env)
             if r["work"].get("status") == "OK":
-                produced = {"prepare": "", "implement": ""}
+                produced = {"prepare": "", "implement": "", "research": ""}
+                if do == "research":
+                    produced["research"] = str(bool(model and model("research", ws)))
                 if do == "prepare":
                     produced["prepare"] = str(bool(model and model("prepare", ws)))
                     r["proceed"] = step("proceed.py", [produced["prepare"]], env)
                 if do == "implement" or (do == "prepare" and r["proceed"].get("proceed") == "yes"):
                     produced["implement"] = str(bool(model and model("implement", ws)))
                 r["deliver"] = step("deliver.py", [project, do, produced["prepare"], "run-prep" if produced["prepare"] else "",
-                                                   produced["implement"], "run-impl" if produced["implement"] else ""], env)
+                                                   produced["implement"], "run-impl" if produced["implement"] else "",
+                                                   produced["research"], "run-res" if produced["research"] else ""], env)
         elif r["adjudicate"].get("integrate") == "yes" or r["adjudicate"].get("phase") == "done":
             r["integrate"] = step("integrate.py", [project], env)
         r["publish"] = step("publish.py", [project], env)
@@ -936,22 +939,38 @@ GEN_PY = ("import os, sys\n"
           "open('dist/collection-plan.tsv', 'w').write(open('collection-plan.tsv').read())\n")
 
 
-def impl_db(by="agent", max_rounds=3):
-    """A task with no pull request yet, in a project that lets devflow implement."""
+def impl_db(by="agent", max_rounds=3, task_type=None):
+    """A task with no pull request yet, in a project that lets devflow implement — and that routes
+    research and survey tasks to the research lane."""
     db = build.scanner_pass()
 
     def pol(p):
+        p["task_types"] = list(p.get("task_types") or []) + ["research", "survey"]
         if not by:
             p.pop("implement", None)
         else:
             p["implement"] = {"by": by, "max_rounds": max_rounds, "regenerate": [["python3", "tools/gen.py"]],
-                              "generated": ["dist/collection-plan.tsv"]}
+                              "generated": ["dist/collection-plan.tsv"],
+                              "modes": {"research": {"writes": ["docs/research/"], "path": "docs/research/{task}.md"},
+                                        "survey": {"writes": ["docs/research/"], "path": "docs/research/{task}.md"}}}
     edit_policy(db, pol, head_too=False)
     r = R(db)
     r["commits"][r["branches"][build.CANONICAL]]["files"]["tools/gen.py"] = GEN_PY
     r["pulls"], r["reviews"] = {}, {}
     set_task(db, pr=None, implementer=None)     # devflow implements; nobody else is named
+    if task_type:
+        set_task(db, type=task_type, change_class="ORDINARY", impacts=[], items=["U-54"])
     return db
+
+
+def research_model(stage, ws, extra=None, report_it=True):
+    """What the research lane writes: one record, and its report."""
+    write(ws, "docs/research/t-0054.md", "# FTP daemons on the target distributions\n\n- vsftpd ... (source: packages.ubuntu.com, 2026-09-25, primary)\n")
+    for path, text in (extra or {}).items():
+        write(ws, path, text)
+    if report_it:
+        report(ws, "research", {"summary": "how FTP daemons are packaged", "topics": [], "decisions": [], "gaps": []})
+    return report_it
 
 
 def write(ws, path, text):
@@ -1177,6 +1196,43 @@ def controls_implement():
         r = s.run_pass(races)
         check("a branch someone created meanwhile is not overwritten",
               (r["deliver"].get("delivered"), "does not overwrite" in r["deliver"].get("failure", "")), ("no", True))
+    finally:
+        s.close()
+
+    s = Sim(impl_db(task_type="research"))
+    try:
+        r = s.run_pass(research_model)
+        db = s.db
+        head = branch_of(db)
+        files = R(db)["commits"].get(head, {}).get("files", {})
+        changed = sorted(p for p in files if files.get(p) != R(db)["commits"][R(db)["branches"][build.CANONICAL]]["files"].get(p))
+        check("a research task goes to the research lane, not to preparation and implementation",
+              (r["act"].get("do"), r["deliver"].get("delivered")), ("research", "yes"))
+        check("its commit holds the record and nothing else — no generator ran", changed, ["docs/research/t-0054.md"])
+        check("and it waits for CI and review like any change",
+              (phase(r), r["state"]["wait"]["reason"]), ("verify_review", "verification"))
+        ev = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
+        s.edit(lambda db: set_runs(db, branch_of(db), build.check_runs()))
+        r2 = s.run_pass(research_model, review_mode="model")
+        ev2 = json.load(open(os.path.join(r2["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
+        check("its review carries the research-record lens", "research-record" in (ev2.get("reviews") or {}).get("required", []), True)
+    finally:
+        s.close()
+
+    s = Sim(impl_db(task_type="research"))
+    try:
+        r = s.run_pass(lambda st, ws: research_model(st, ws, {"items/kisa/U-54.yaml": "id: U-54\n"}))
+        check("a research lane that writes outside the research directory: nothing is pushed",
+              (r["deliver"].get("delivered"), "outside" in r["deliver"].get("failure", ""), branch_of(s.db)), ("no", True, None))
+    finally:
+        s.close()
+
+    s = Sim(impl_db(task_type="survey"))
+    try:
+        r = s.run_pass(lambda st, ws: research_model(st, ws, report_it=False))
+        check("a survey step that produced no report in this attempt: nothing is pushed",
+              (r["act"].get("do"), r["deliver"].get("delivered"), "no research.json" in r["deliver"].get("failure", "")),
+              ("research", "no", True))
     finally:
         s.close()
 
