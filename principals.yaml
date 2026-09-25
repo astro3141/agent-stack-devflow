@@ -55,11 +55,11 @@ principals:
           rule_description: the implementer writes the checkout
         - action: allow
           condition_type: simple
-          condition_expression: "args.path.endsWith('/devflow/prepare.json')"
+          condition_expression: "args.path.contains('/devflow/prepare.json')"
           rule_description: and preparation's report
         - action: allow
           condition_type: simple
-          condition_expression: "args.path.endsWith('/devflow/implement.json')"
+          condition_expression: "args.path.contains('/devflow/implement.json')"
           rule_description: and the implementation's report
         - action: deny
           condition_type: simple
@@ -100,7 +100,7 @@ principals:
           rule_description: the researcher writes the checkout
         - action: allow
           condition_type: simple
-          condition_expression: "args.path.endsWith('/devflow/research.json')"
+          condition_expression: "args.path.contains('/devflow/research.json')"
           rule_description: and its report
         - action: deny
           condition_type: simple
