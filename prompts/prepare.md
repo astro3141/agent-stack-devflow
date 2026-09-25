@@ -60,6 +60,13 @@ Classification the project's rules gave it so far:
 could be judged correct. Do not guess past such a point, and do not invent certainty: an
 unresolved question stated plainly is a correct preparation.
 
+## Time
+
+The call has a time limit, and a call that runs out of it produces nothing: nothing it wrote is
+used. Research until the questions that decide the result are answered, not every question; write
+the trace, the research record and `{OUT}` as soon as your answer is clear, and improve them afterwards if time remains.
+(Measured: a preparation that researched every variant ran 30 minutes and delivered nothing.)
+
 ## Rules
 
 - Write only the two files above and `{OUT}`. Do not change anything else in this call.

@@ -58,6 +58,13 @@ why in `{OUT}` and leave the decision to a person.
  "disputed": ["a finding you did not follow, and your reason"]}
 ```
 
+## Time
+
+The call has a time limit, and a call that runs out of it produces nothing: nothing it wrote is
+used. Research until the questions that decide the result are answered, not every question; write
+the change and `{OUT}` as soon as your answer is clear, and improve them afterwards if time remains.
+(Measured: a preparation that researched every variant ran 30 minutes and delivered nothing.)
+
 ## Rules
 
 - Stay inside the task's scope. Keep unrelated files as they are.

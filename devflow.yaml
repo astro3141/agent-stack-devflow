@@ -59,7 +59,7 @@ workflow:
       description: execution profile for devflow's implementer (its call limit is the profile's)
   limits:
     max_iterations: 30
-    timeout_seconds: 7200
+    timeout_seconds: 10800
 
 agents:
   - name: evaluate
