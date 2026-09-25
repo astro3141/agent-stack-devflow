@@ -62,15 +62,42 @@ def stage_fixture(name):
     raise dfcore.ConfigError(f"no fixture remote {name!r}", hint="the hand-in directory, or packages/devflow/fixtures/remotes/")
 
 
-def implementers_of(task, pr, changed):
-    ids = set(changed.get("authors") or [])
-    if pr and pr.get("author"):
+def implementers_of(task, pr, changed, hist=None):
+    """Everyone who implemented the change. devflow's own commits are the implementer principal's,
+    whoever holds the credential that pushed them: the pull request's author is then only the
+    account the push went through — unless a commit devflow did not push is in the change too, in
+    which case the author counts as well. A commit devflow did not record pushing is never assumed
+    to be devflow's, whatever its author field says."""
+    hist = hist or {}
+    pushed = set(hist.get("pushed") or [])
+    commits = set(changed.get("commits") or [])
+    ours = commits & pushed
+    ids = set()
+    for a in changed.get("authors") or []:
+        ids.add(dfcore.IMPLEMENTER if (a in dfcore.IMPLEMENTER_AUTHORS and ours) else a)
+    ours_only = bool(commits) and commits <= pushed
+    if pr and pr.get("author") and not ours_only:
         ids.add(pr["author"])
     impl = task.get("implementer") or {}
     ids |= set(impl.get("identities") or [])
-    return {"identities": sorted(i for i in ids if i),
-            "principals": list(impl.get("principals") or []),
-            "sessions": list(impl.get("sessions") or [])}
+    principals = list(impl.get("principals") or [])
+    sessions = list(impl.get("sessions") or [])
+    if ours:
+        ids.add(dfcore.IMPLEMENTER)
+        principals.append(dfcore.IMPLEMENTER)
+        sessions += list(hist.get("impl_sessions") or [])
+    return {"identities": sorted(i for i in ids if i), "principals": sorted(set(principals)),
+            "sessions": sorted(set(sessions)), "devflow_only": ours_only}
+
+
+def find_pr(rem, task, hist):
+    """The task's pull request: the one the task block names; else the one devflow opened for it
+    (recorded in the published state, or found by the task's branch)."""
+    if task.get("pr"):
+        return rem.pull(task["pr"])
+    if hist.get("pr"):
+        return rem.pull(hist["pr"])
+    return rem.find_pull(dfcore.task_branch(task))
 
 
 def approvals(comments, pol, implementers):
@@ -144,7 +171,7 @@ def main(argv):
         hook_root = os.path.join(D, "policy")
         hook_digests = dfcore.materialize_hook(rem, pol, canonical_head, hook_root)
         base_lenses, lenses = dfcore.load_lenses(pol, hook_root)
-        pr = rem.pull(task["pr"]) if task.get("pr") else None
+        pr = find_pr(rem, task, ev["history"])
         changed = rem.changed_files(pr["base_sha"], pr["head_sha"]) if pr else {"files": [], "authors": []}
         crit = dfcore.criteria_blobs(rem, pol, canonical_head)
     except (dfcore.ConfigError, remote_mod.RemoteError) as e:
@@ -153,8 +180,10 @@ def main(argv):
 
     wf = dfcore.workflow_identity()
     frame = dfcore.frame_of(reg, pol, wf, pr, canonical_head, crit, hook_digests, task)
-    ev.update(frame=frame, pr=pr, changed=changed["files"], policy={"ref": pol["_ref"], "digest": pol["_digest"]})
-    impl = implementers_of(task, pr, changed)
+    ev.update(frame=frame, pr=pr, changed=changed["files"], policy={"ref": pol["_ref"], "digest": pol["_digest"]},
+              policy_doc={k: v for k, v in pol.items() if not k.startswith("_")},
+              canonical_head=canonical_head, branch=dfcore.task_branch(task))
+    impl = implementers_of(task, pr, changed, ev["history"])
     ev["implementers"] = impl
 
     # Holds a person placed on the task (the project's own control labels) come before anything.
@@ -201,6 +230,15 @@ def main(argv):
     task_digest = dfcore.sha256(dfcore.canon({k: v for k, v in task.items()
                                               if k not in ("issue", "pr", "transaction_commit")}))[:12]
     ev["task_digest"] = task_digest
+    # What devflow's own preparation could not settle (a mapping it could not confirm, a gap in the
+    # contract) holds the task until a person records the answer in the task block — which changes
+    # the task digest the hold is bound to.
+    hold = ev["history"].get("prepare_hold") or {}
+    # a head that holds only that preparation is not an implementation, whatever its checks say
+    ev["prepare_only"] = bool(hold) and bool(pr) and hold.get("head") == pr.get("head_sha")
+    if hold and hold.get("task_digest") == task_digest:
+        ev["prepare"]["decisions"] += [f"preparation: {d}" for d in hold.get("decisions") or []]
+        ev["prepare"]["gaps"] += [f"preparation: {g}" for g in hold.get("gaps") or []]
     gate_state = []
     for g in gates:
         want = task_digest if g.get("binds") == "task" else (pr or {}).get("head_sha")
@@ -370,6 +408,16 @@ def main(argv):
         if a["by"] == "model" and a["independent"] and "model" not in (rv.get("independent_by") or ["model", "human"]):
             a["by"] = "external"
             a["why"] = "the policy requires this independent review from a person"
+    # A model review of a head whose checks are still running, or already failing, is spent on
+    # something that is not the candidate yet: the failure alone decides the next step.
+    chk_now = ev.get("checks") or {}
+    not_ready = (chk_now.get("pending") or chk_now.get("failed") or chk_now.get("tool")
+                 or ev["violations"] or (ev.get("trace") or {}).get("problems"))
+    if not_ready:
+        for a in assignments:
+            if a["by"] == "model":
+                a["by"] = "deferred"
+                a["why"] = "waiting for this head's checks to complete without a failure"
     model_needed = [a for a in assignments if a["by"] == "model"]
     if used + len(model_needed) > int(budget.get("model_calls") or 6):
         for a in model_needed:

@@ -18,6 +18,8 @@ Groups, by the risk each pins:
   effects     an effect that happened with its answer lost is not repeated on resume
   rules       a change to the rules is judged by the canonical rules, not by itself
   tool        a machinery failure is TOOL_FAILURE with no verdict — never a rejection
+  implement   devflow prepares and implements within the canonical rules; what it may push, when it
+              stops, whose branch it is
 """
 import copy, hashlib, json, os, secrets, shutil, subprocess, sys, tempfile
 
@@ -85,6 +87,39 @@ class Sim:
         except Exception:
             r["state"] = {}
         self.runs.append(ws)
+        return r
+
+    def run_pass(self, model=None, project="scanner-fixture", review_mode="external"):
+        """One pass as devflow.yaml wires it, with act and the implementation branch. `model(stage,
+        ws)` stands in for the model steps: it writes into ws/repo and ws/devflow/<stage>.json and
+        returns whether it produced its file (a model that fails returns False)."""
+        rid = "ctl-" + secrets.token_hex(4)
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid, "DEVFLOW_HANDOFF": self.dir}
+        ws = os.path.join(WS_ROOT, rid)
+        self.runs.append(ws)
+        r = {"ws": ws}
+        r["evaluate"] = step("evaluate.py", [project, "3", "ctl", review_mode], env)
+        r["adjudicate"] = step("adjudicate.py", [""], env)
+        r["act"] = step("act.py", [], env)
+        do = r["act"].get("do")
+        if do in ("prepare", "implement", "rebase"):
+            r["work"] = step("work.py", [project, do], env)
+            if r["work"].get("status") == "OK":
+                produced = {"prepare": "", "implement": ""}
+                if do == "prepare":
+                    produced["prepare"] = str(bool(model and model("prepare", ws)))
+                    r["proceed"] = step("proceed.py", [produced["prepare"]], env)
+                if do == "implement" or (do == "prepare" and r["proceed"].get("proceed") == "yes"):
+                    produced["implement"] = str(bool(model and model("implement", ws)))
+                r["deliver"] = step("deliver.py", [project, do, produced["prepare"], "run-prep" if produced["prepare"] else "",
+                                                   produced["implement"], "run-impl" if produced["implement"] else ""], env)
+        elif r["adjudicate"].get("integrate") == "yes" or r["adjudicate"].get("phase") == "done":
+            r["integrate"] = step("integrate.py", [project], env)
+        r["publish"] = step("publish.py", [project], env)
+        try:
+            r["state"] = json.load(open(os.path.join(ws, "devflow", "state.json"), encoding="utf-8"))
+        except Exception:
+            r["state"] = {}
         return r
 
     def close(self):
@@ -893,9 +928,340 @@ def controls_tool():
         s.close()
 
 
+# ================================================================================== implement
+GEN_PY = ("import os, sys\n"
+          "if os.path.exists('FAILGEN'):\n"
+          "    sys.exit('generator: refused')\n"
+          "os.makedirs('dist', exist_ok=True)\n"
+          "open('dist/collection-plan.tsv', 'w').write(open('collection-plan.tsv').read())\n")
+
+
+def impl_db(by="agent", max_rounds=3):
+    """A task with no pull request yet, in a project that lets devflow implement."""
+    db = build.scanner_pass()
+
+    def pol(p):
+        if not by:
+            p.pop("implement", None)
+        else:
+            p["implement"] = {"by": by, "max_rounds": max_rounds, "regenerate": [["python3", "tools/gen.py"]],
+                              "generated": ["dist/collection-plan.tsv"]}
+    edit_policy(db, pol, head_too=False)
+    r = R(db)
+    r["commits"][r["branches"][build.CANONICAL]]["files"]["tools/gen.py"] = GEN_PY
+    r["pulls"], r["reviews"] = {}, {}
+    set_task(db, pr=None, implementer=None)     # devflow implements; nobody else is named
+    return db
+
+
+def write(ws, path, text):
+    p = os.path.join(ws, "repo", path)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w", encoding="utf-8").write(text)
+
+
+def report(ws, stage, doc):
+    json.dump(doc, open(os.path.join(ws, "devflow", f"{stage}.json"), "w", encoding="utf-8"))
+
+
+def good_model(stage, ws, extra=None):
+    """What a correct implementer writes for the fixture's U-54 task."""
+    if stage == "prepare":
+        write(ws, ".devflow/tasks/T-0054.yaml", build.TRACE)
+        write(ws, ".devflow/tasks/T-0054.research.md", "- vsftpd is the FTP daemon (primary: distro docs)\n")
+        report(ws, "prepare", {"proceed": True, "summary": "U-54 on service_state", "acceptance": ["REVIEW when active"],
+                               "plan": ["items/kisa/U-54.yaml"], "decisions": [], "gaps": []})
+        return True
+    write(ws, "items/kisa/U-54.yaml", "id: U-54\nbaseline_status: confirmed\n")
+    write(ws, "bindings/linux/u54.yaml", "produces: [service.state]\n")
+    write(ws, "collection-plan.tsv", build.plan(build.OPS + [build.NEW_OP]))
+    write(ws, "tests/test_u54_ftp.py", "assert len(ops) == 4\n")
+    for path, text in (extra or {}).items():
+        write(ws, path, text)
+    report(ws, "implement", {"summary": "U-54", "changed": ["items/kisa/U-54.yaml — the item"], "tests": [],
+                             "not_done": [], "disputed": []})
+    return True
+
+
+def branch_of(db):
+    return R(db)["branches"].get("devflow/t-0054")
+
+
+def controls_implement():
+    print("\nimplement — devflow prepares and implements; the canonical rules decide what may be pushed")
+    import yaml
+    s = Sim(impl_db(by=None))
+    try:
+        r = s.run_pass(good_model)
+        check("a project that does not let devflow implement: nothing is acted on, the task waits for a person",
+              (r["act"].get("do"), phase(r), r["state"]["wait"]["reason"]), ("none", "implement", "implementation"))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        r = s.run_pass(good_model)
+        db = s.db
+        head = branch_of(db)
+        prn = str(r["state"]["history"].get("pr"))
+        pr = R(db)["pulls"].get(prn) or {}
+        files = R(db)["commits"].get(head, {}).get("files", {})
+        check("no implementation yet: devflow prepares, implements, and pushes one commit on devflow/<task>",
+              (r["act"].get("do"), r["deliver"].get("delivered"), bool(head)), ("prepare", "yes", True))
+        check("the commit is devflow-implementer's, on top of canonical",
+              (R(db)["commits"][head]["author"], R(db)["commits"][head]["parents"]),
+              ("devflow-implementer", [R(db)["branches"][build.CANONICAL]]))
+        check("the project's generator ran: the generated file follows the source it is generated from",
+              files.get("dist/collection-plan.tsv") == files.get("collection-plan.tsv") == build.plan(build.OPS + [build.NEW_OP]), True)
+        check("the trace and the research record are in the change",
+              (".devflow/tasks/T-0054.yaml" in files, ".devflow/tasks/T-0054.research.md" in files), (True, True))
+        check("a pull request is opened for the branch, marked as devflow's",
+              (pr.get("head_ref"), dfcore_mark() in (pr.get("body") or "")), ("devflow/t-0054", True))
+        check("the published state waits for CI on the new head, with no verdict",
+              (phase(r), verdict(r), r["state"]["wait"]["reason"], r["state"]["wait"]["owner"]),
+              ("verify_review", None, "verification", "CI"))
+        check("no verdict status is put on a head nobody judged", R(db).get("statuses", {}).get(head), None)
+
+        r2 = s.run_pass(good_model, review_mode="model")
+        check("the next pass finds devflow's pull request from the published state",
+              (r2["state"].get("pr") or {}).get("number"), int(prn))
+        ev2 = json.load(open(os.path.join(r2["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
+        check("while CI runs, no model review is spent on the head", (r2["evaluate"].get("need_models"),
+              sorted({a["by"] for a in ev2.get("assignments") or []})), ("no", ["deferred"]))
+        check("the implementer is devflow-implementer, not the account the push went through",
+              (ev2["implementers"]["identities"], ev2["implementers"]["principals"]),
+              (["devflow-implementer"], ["devflow-implementer"]))
+
+        def green_and_reviewed(db):
+            set_runs(db, head, build.check_runs())
+            R(db).setdefault("reviews", {})[prn] = [{"id": 900, "user": "rev-person", "commit_id": head, "state": "COMMENTED",
+                                                    "body": build.review_body(head, build.LENSES_PASS, digest=canonical_digest(db),
+                                                                              basis=canonical_basis(db))}]
+        s.edit(green_and_reviewed)
+        r3 = s.run_pass(good_model)
+        check("green checks and a review on devflow's head: PASS, handed to the merge owner (agents do not merge)",
+              (verdict(r3), phase(r3), (r3["state"].get("wait") or {}).get("reason"), r3["act"].get("do")),
+              ("PASS", "integrate", "merge", "none"))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        def fails_ci(db):
+            set_runs(db, branch_of(db), build.check_runs(["devflow-policy", "scanner-publish", "plan-ops", "distro-smoke"])
+                     + build.check_runs(["scanner-quick"], "failure"))
+        s.run_pass(good_model)
+        first = branch_of(s.db)
+        s.edit(fails_ci)
+        seen = {}
+
+        def fixer(stage, ws):
+            seen["feedback"] = json.load(open(os.path.join(ws, "devflow", "feedback.json"), encoding="utf-8"))
+            return good_model(stage, ws, {"items/kisa/U-54.yaml": "id: U-54\nbaseline_status: confirmed\n# fixed\n"})
+        r = s.run_pass(fixer)
+        db = s.db
+        check("a failing check on devflow's head: REQUEST_CHANGES, and devflow implements again",
+              (r["adjudicate"].get("verdict"), r["act"].get("do"), r["deliver"].get("delivered")),
+              ("REQUEST_CHANGES", "implement", "yes"))
+        check("the implementer is told which check failed", [c["name"] for c in seen["feedback"]["failed_checks"]],
+              ["scanner-quick"])
+        check("the fix is a new commit on top of the failed head — the branch fast-forwards, nothing is forced",
+              (R(db)["commits"][branch_of(db)]["parents"], len(r["state"]["history"]["pushed"])), ([first], 2))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        r = s.run_pass(lambda st, ws: good_model(st, ws, {".devflow/project.yaml": "schema: devflow/project@1\n"}))
+        check("an implementation that edits the project's rules is not pushed",
+              (r["deliver"].get("delivered"), "rules" in r["deliver"].get("failure", ""), branch_of(s.db)), ("no", True, None))
+        check("the round is spent, and the task waits for implementation with the reason",
+              (r["state"]["history"]["implement_rounds"], r["state"]["wait"]["reason"],
+               any("rules" in b for b in r["state"]["blockers"])), (1, "implementation", True))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        r = s.run_pass(lambda st, ws: good_model(st, ws, {"collector/collect.sh": "#!/bin/sh\necho changed\n"}))
+        check("an ordinary change touching the collector breaks the project's scope rules: not pushed",
+              (r["deliver"].get("delivered"), "scope" in r["deliver"].get("failure", "")), ("no", True))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        r = s.run_pass(lambda st, ws: good_model(st, ws) if st == "prepare" else False)
+        check("an implementation step that produced nothing in this attempt: nothing is pushed",
+              (r["deliver"].get("delivered"), "no implement.json" in r["deliver"].get("failure", "")), ("no", True))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        r = s.run_pass(lambda st, ws: good_model(st, ws, {"FAILGEN": "x"}))
+        check("the project's generator fails: nothing is pushed, and the failure is the reason",
+              (r["deliver"].get("delivered"), "regeneration failed" in r["deliver"].get("failure", "")), ("no", True))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        def hold(stage, ws):
+            write(ws, ".devflow/tasks/T-0054.yaml", build.TRACE)
+            write(ws, ".devflow/tasks/T-0054.research.md", "- open question\n")
+            write(ws, "items/kisa/U-54.yaml", "id: U-54\n")          # not pushed while the task is held
+            report(ws, "prepare", {"proceed": False, "summary": "needs a decision",
+                                   "decisions": ["is the FTPS exception observable?"], "gaps": []})
+            return True
+        r = s.run_pass(hold)
+        files = R(s.db)["commits"][branch_of(s.db)]["files"]
+        check("preparation that leaves a question: its record is pushed, the implementation is not",
+              (r.get("proceed", {}).get("proceed"), ".devflow/tasks/T-0054.yaml" in files, files.get("items/kisa/U-54.yaml")),
+              ("no", True, None))
+        check("and the task waits for that decision: NEEDS_DECISION in preparation",
+              (verdict(r), phase(r), r["state"]["wait"]["reason"]), ("NEEDS_DECISION", "prepare", "decision"))
+        s.edit(lambda db: set_runs(db, branch_of(db), build.check_runs()))
+        r2 = s.run_pass(good_model)
+        check("green checks on that head change nothing: preparation is not an implementation",
+              (verdict(r2), phase(r2), r2["act"].get("do")), ("NEEDS_DECISION", "prepare", "none"))
+        s.edit(lambda db: set_task(db, decisions=["FTPS: not observable; REVIEW (astro3141, 2026-09-25)"]))
+        before = branch_of(s.db)
+        r3 = s.run_pass(good_model)
+        check("once the task records the answer, devflow prepares again on its branch and implements",
+              (r3["act"].get("do"), r3["deliver"].get("delivered"), R(s.db)["commits"][branch_of(s.db)]["parents"]),
+              ("prepare", "yes", [before]))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        s.run_pass(good_model)
+
+        def human_commit(db):
+            r = R(db)
+            h = branch_of(db)
+            files = dict(r["commits"][h]["files"], **{"items/kisa/U-54.yaml": "id: U-54\n# by hand\n"})
+            new = "e" + build.sha(json.dumps(files, sort_keys=True))[:39]
+            r["commits"][new] = {"parents": [h], "files": files, "author": "someone"}
+            r["branches"]["devflow/t-0054"] = new
+            for p in r["pulls"].values():
+                p["head_sha"] = new
+            set_runs(db, new, build.check_runs(["devflow-policy", "scanner-publish", "plan-ops", "distro-smoke"])
+                     + build.check_runs(["scanner-quick"], "failure"))
+        s.edit(human_commit)
+        r = s.run_pass(good_model)
+        ev = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
+        check("someone else's commit on devflow's branch: they and the account behind the PR are implementers",
+              ("someone" in ev["implementers"]["identities"], "operator" in ev["implementers"]["identities"]), (True, True))
+        check("and devflow does not take the branch back: its implementer continues it",
+              (verdict(r), r["act"].get("do")), ("REQUEST_CHANGES", "none"))
+    finally:
+        s.close()
+
+    s = Sim(impl_db(max_rounds=1))
+    try:
+        s.run_pass(good_model)
+        s.edit(lambda db: set_runs(db, branch_of(db), build.check_runs(["scanner-quick"], "failure")))
+        r = s.run_pass(good_model)
+        check("implement.max_rounds spent: devflow stops implementing and says so",
+              (verdict(r), r["act"].get("do"), "max_rounds" in r["act"].get("why", "")), ("REQUEST_CHANGES", "none", True))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        def races(stage, ws):
+            s.edit(lambda db: R(db)["branches"].__setitem__("devflow/t-0054", R(db)["branches"][build.CANONICAL]))
+            return good_model(stage, ws)
+        r = s.run_pass(races)
+        check("a branch someone created meanwhile is not overwritten",
+              (r["deliver"].get("delivered"), "does not overwrite" in r["deliver"].get("failure", "")), ("no", True))
+    finally:
+        s.close()
+
+    sys.path.insert(0, STEPS)
+    import drive
+    d = lambda **p: drive.decide({"ok": True, **p}, None, 0, 3600)[:2]
+    check("drive: a pass that pushed a head waits for CI, then passes again", d(delivered="yes abc PR 4"), (True, -1))
+    check("drive: CI still running on the head: wait, then pass again", d(wait="verification", owner="CI"), (True, -1))
+    check("drive: a decision is a person's move: stop", d(wait="decision", owner="decision owner")[0], False)
+    check("drive: the task is done: stop", d(phase="done")[0], False)
+    check("drive: a failed pass: stop", drive.decide({"ok": False, "reason": "x"}, None, 0, 1)[0], False)
+    same = {"ok": True, "verdict": None, "phase": "verify_review", "wait": "review", "owner": "reviewer", "head": "h"}
+    check("drive: a pass that reached the same state as the last one: stop (no progress)",
+          drive.decide(same, dict(same), 0, 1)[0], False)
+
+
+def controls_auth():
+    print("\nauth — the panel's GitHub login: used as it is, refreshed before it expires, never guessed")
+    import ghauth
+    d = tempfile.mkdtemp(prefix="devflow-auth-")
+    old = {k: os.environ.get(k) for k in ("DEVFLOW_GITHUB_HOME", "DEVFLOW_GITHUB_TOKEN")}
+    os.environ["DEVFLOW_GITHUB_HOME"] = d
+    os.environ.pop("DEVFLOW_GITHUB_TOKEN", None)
+    path = os.path.join(d, ghauth.TOKEN_FILE)
+    calls = []
+
+    def post(url, fields):
+        calls.append(fields)
+        return {"access_token": "ghu_new", "expires_in": 28800, "refresh_token": "ghr_new",
+                "refresh_token_expires_in": 15897600}
+    try:
+        try:
+            ghauth.token()
+            got = "no error"
+        except ghauth.AuthError as e:
+            got = "연결" in e.hint
+        check("no login and no token: refused, and the hint names the panel's 연결", got, True)
+        os.environ["DEVFLOW_GITHUB_TOKEN"] = "ghp_env"
+        check("DEVFLOW_GITHUB_TOKEN alone still works", ghauth.token(), "ghp_env")
+        ghauth.write_token(path, {"access_token": "gho_forever", "client_id": "c"})
+        check("a login token that does not expire is used as it is — and before the env token",
+              (ghauth.token(post=post), calls), ("gho_forever", []))
+        now = 1_000_000.0
+        ghauth.write_token(path, {"access_token": "ghu_old", "client_id": "c", "expires_at": now + 60,
+                                  "refresh_token": "ghr_old", "refresh_expires_at": now + 10**6, "login": "astro3141"})
+        tok = ghauth.token(now=now, post=post)
+        kept = json.load(open(path))
+        check("an 8-hour token about to expire is refreshed with its refresh token, no secret, no person",
+              (tok, calls[-1]["grant_type"], calls[-1]["refresh_token"], "client_secret" in calls[-1]),
+              ("ghu_new", "refresh_token", "ghr_old", False))
+        check("and the new pair is kept, with who logged in",
+              (kept["access_token"], kept["refresh_token"], kept["login"], oct(os.stat(path).st_mode & 0o777)),
+              ("ghu_new", "ghr_new", "astro3141", "0o600"))
+        ghauth.write_token(path, dict(kept, expires_at=now + 60, refresh_expires_at=now - 1))
+        try:
+            ghauth.token(now=now, post=post)
+            got = "no error"
+        except ghauth.AuthError as e:
+            got = "six months" in str(e)
+        check("a refresh token past its six months: refused with the reason, not a request that fails later", got, True)
+        ghauth.write_token(path, dict(kept, expires_at=now + 60, refresh_expires_at=now + 10**6))
+        try:
+            ghauth.token(now=now, post=lambda u, f: {"error": "bad_refresh_token"})
+            got = "no error"
+        except ghauth.AuthError as e:
+            got = "bad_refresh_token" in str(e)
+        check("GitHub refusing the refresh is an error that says so", got, True)
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def dfcore_mark():
+    import dfcore
+    return dfcore.PR_MARK
+
+
 if __name__ == "__main__":
     for group in (controls_flow, controls_block, controls_stale, controls_foundation, controls_evidence,
-                  controls_shared, controls_effects, controls_rules, controls_tool):
+                  controls_shared, controls_effects, controls_rules, controls_tool, controls_implement,
+                  controls_auth):
         group()
     print("")
     print(f"{len(PASS_)}/{len(PASS_) + len(FAIL_)} controls")

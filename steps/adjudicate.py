@@ -100,7 +100,7 @@ def main(argv):
            "checks": ev.get("checks"), "trace": ev.get("trace"), "reviews": reviews,
            "shared": ev.get("shared"), "finalize": ev.get("finalize"), "history": ev.get("history") or {},
            "tool": ev.get("tool"), "end_point": ev.get("end_point"),
-           "violations": ev.get("violations"), "flow": ev.get("flow")}
+           "violations": ev.get("violations"), "flow": ev.get("flow"), "prepare_only": ev.get("prepare_only")}
     st = dfcore.adjudicate(ctx)
 
     hist = dict(ev.get("history") or {})

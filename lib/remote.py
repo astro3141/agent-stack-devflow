@@ -10,10 +10,10 @@ already happened. That is what "the state of a task is GitHub's" means in code.
 
 Two implementations with one surface:
 
-  GitHubRemote   the REST API, with a token from the package's own env file
-                 (docker/package.env, DEVFLOW_GITHUB_TOKEN) through the egress proxy — which reaches
-                 api.github.com only if the operator added it to docker/egress/allow. Without
-                 either, it refuses with a hint that names the file (docs/packages.md).
+  GitHubRemote   the REST API, with the token lib/ghauth.py finds (the panel's GitHub login, else
+                 DEVFLOW_GITHUB_TOKEN in docker/package.env), through the egress proxy — which
+                 reaches api.github.com only if the operator added it to docker/egress/allow.
+                 Without a credential it refuses with a hint that names both ways.
   FixtureRemote  one JSON file. Used by the controls and by fixture runs through the real runner,
                  and able to inject the faults a real remote has: a request that took effect but
                  whose answer was lost, an API that is down.
@@ -46,10 +46,13 @@ class GitHubRemote:
 
     def __init__(self, repo, token=None, proxy_env=None):
         self.repo = repo
-        self.token = token if token is not None else os.environ.get("DEVFLOW_GITHUB_TOKEN", "")
-        if not self.token:
-            raise RemoteError("no GitHub token: put DEVFLOW_GITHUB_TOKEN=<token> in docker/package.env "
-                              "and add ^api\\.github\\.com$ to docker/egress/allow (docs/packages.md)")
+        if token is None:
+            import ghauth
+            try:
+                token = ghauth.token(proxy_env)
+            except ghauth.AuthError as e:
+                raise RemoteError(f"{e} — {e.hint}" if e.hint else str(e))
+        self.token = token
         handlers = []
         if proxy_env:
             handlers.append(urllib.request.ProxyHandler(
@@ -145,6 +148,7 @@ class GitHubRemote:
                 "authors": sorted({(x.get("author") or {}).get("login") or
                                    (x.get("commit", {}).get("author") or {}).get("email", "")
                                    for x in c.get("commits", [])}),
+                "commits": [x["sha"] for x in c.get("commits", [])],
                 "merge_base": (c.get("merge_base_commit") or {}).get("sha", "")}
 
     def contains(self, ancestor, descendant):
@@ -167,7 +171,10 @@ class GitHubRemote:
         rows = self._pages(f"/commits/{sha}/check-runs", key="check_runs")
         runs = [{"name": r["name"], "status": r["status"], "conclusion": r.get("conclusion"),
                  "head_sha": r.get("head_sha", sha), "id": r["id"],
-                 "completed_at": r.get("completed_at")} for r in rows]
+                 "completed_at": r.get("completed_at"), "url": r.get("html_url") or "",
+                 # what the check said about itself — shown to an implementer fixing a failure
+                 "title": ((r.get("output") or {}).get("title") or "")[:200],
+                 "summary": ((r.get("output") or {}).get("summary") or "")[:2000]} for r in rows]
         for s in self._pages(f"/commits/{sha}/statuses"):
             runs.append({"name": s["context"], "status": "completed" if s["state"] != "pending" else "in_progress",
                          "conclusion": {"success": "success", "failure": "failure", "error": "startup_failure"}
@@ -243,6 +250,93 @@ class GitHubRemote:
     def merge(self, number, sha, method):
         r = self._call("PUT", f"/pulls/{int(number)}/merge", {"sha": sha, "merge_method": method})
         return r.get("sha")
+
+    # --- what an implementation needs: a tree to work in, a commit, a pull request
+    def branch_head_or_none(self, branch):
+        got = self._call("GET", f"/branches/{urllib.parse.quote(branch, safe='')}", ok404=True)
+        return (got or {}).get("commit", {}).get("sha")
+
+    def find_pull(self, head_ref):
+        """The newest pull request whose head is this repository's `head_ref`, or None."""
+        owner = self.repo.split("/")[0]
+        rows = self._call("GET", f"/pulls?state=all&head={urllib.parse.quote(owner + ':' + head_ref)}&per_page=10")
+        rows = sorted(rows or [], key=lambda p: p["number"], reverse=True)
+        return self.pull(rows[0]["number"]) if rows else None
+
+    def create_pull(self, head_ref, base_ref, title, body):
+        r = self._call("POST", "/pulls", {"head": head_ref, "base": base_ref, "title": title[:250], "body": body})
+        return r["number"]
+
+    def materialize(self, sha, dest, only=None):
+        """The tree of `sha`, written under dest (the archive's top directory removed). `only`: a
+        path prefix to keep. Returns the paths written."""
+        import tarfile, tempfile
+        url = f"{self.API}/repos/{self.repo}/tarball/{sha}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.token}",
+                                                   "User-Agent": "agent-stack-devflow"})
+        written = []
+        with tempfile.TemporaryFile() as tmp:
+            try:
+                with self._open(req, timeout=300) as r:
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        tmp.write(chunk)
+            except urllib.error.HTTPError as e:
+                raise RemoteError(f"tarball {sha[:12]}: HTTP {e.code}")
+            except (urllib.error.URLError, TimeoutError, OSError) as e:
+                raise RemoteError(f"tarball {sha[:12]}: {type(e).__name__}: {e} "
+                                  "(the archive is served from codeload.github.com: docker/egress/allow)")
+            tmp.seek(0)
+            with tarfile.open(fileobj=tmp, mode="r:*") as tf:
+                for m in tf.getmembers():
+                    if not m.isfile():
+                        continue
+                    rel = m.name.split("/", 1)[1] if "/" in m.name else ""
+                    if not rel or ".." in rel.split("/") or (only and not rel.startswith(only)):
+                        continue
+                    out = os.path.join(dest, rel)
+                    os.makedirs(os.path.dirname(out), exist_ok=True)
+                    with tf.extractfile(m) as src, open(out, "wb") as f:
+                        f.write(src.read())
+                    if m.mode & 0o111:
+                        os.chmod(out, 0o755)
+                    written.append(rel)
+        return written
+
+    def push_commit(self, branch, parent, changes, message, author, base=None, extra_parents=()):
+        """One commit with `changes` ({path: (bytes, mode) | None for a deletion}) applied to the tree
+        of `base` (default `parent`), whose parents are `parent` and `extra_parents`, and `branch`
+        moved to it — created if absent, fast-forwarded if present, never forced. A branch that
+        moved away from `parent` meanwhile is a Conflict: someone else pushed.
+
+        `base` and `extra_parents` are how a change is brought onto a newer canonical head without
+        rewriting what was pushed: the tree is canonical's plus the change, the parents are the
+        branch's head and canonical — a merge the branch fast-forwards to."""
+        import base64
+        base = base or parent
+        tree_items = []
+        for path, ch in sorted(changes.items()):
+            if ch is None:
+                tree_items.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+                continue
+            data, mode = ch
+            blob = self._call("POST", "/git/blobs", {"content": base64.b64encode(data).decode(), "encoding": "base64"})
+            tree_items.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
+        base_tree = self._call("GET", f"/git/commits/{base}")["tree"]["sha"]
+        tree = self._call("POST", "/git/trees", {"base_tree": base_tree, "tree": tree_items})
+        commit = self._call("POST", "/git/commits", {"message": message, "tree": tree["sha"],
+                                                    "parents": [parent] + list(extra_parents),
+                                                    "author": author})["sha"]
+        now = self.branch_head_or_none(branch)
+        if now is None:
+            self.create_ref(f"refs/heads/{branch}", commit)
+        elif now != parent:
+            raise Conflict(f"{branch} is at {now[:12]}, not at {parent[:12]}: someone else pushed")
+        else:
+            self._call("PATCH", f"/git/refs/heads/{branch}", {"sha": commit, "force": False})
+        return commit
 
 
 # ----------------------------------------------------------------------------------- fixture
@@ -336,7 +430,7 @@ class FixtureRemote:
             c = self.r["commits"][s]
             authors.add(c.get("author", ""))
             todo += c.get("parents", [])
-        return {"files": files, "authors": sorted(authors), "merge_base": base}
+        return {"files": files, "authors": sorted(authors), "commits": sorted(seen), "merge_base": base}
 
     def contains(self, ancestor, descendant):
         self._up()
@@ -466,6 +560,67 @@ class FixtureRemote:
             self.r.setdefault("check_runs", {}).setdefault(new, []).append(dict(run))
         self._save()
         self._lose("merge")
+        return new
+
+    # --- what an implementation needs
+    def branch_head_or_none(self, branch):
+        self._up()
+        return self.r["branches"].get(branch)
+
+    def find_pull(self, head_ref):
+        self._up()
+        rows = sorted((p for p in self.r["pulls"].values() if p.get("head_ref") == head_ref),
+                      key=lambda p: int(p["number"]), reverse=True)
+        return self.pull(rows[0]["number"]) if rows else None
+
+    def create_pull(self, head_ref, base_ref, title, body):
+        self._up()
+        if head_ref not in self.r["branches"]:
+            raise Conflict(f"fixture: no branch {head_ref}")
+        n = max([int(k) for k in self.r["pulls"]] + [int(k) for k in self.r["issues"]] + [0]) + 1
+        self.r["pulls"][str(n)] = {"number": n, "state": "open", "merged": False, "merge_commit_sha": None,
+                                   "head_sha": self.r["branches"][head_ref], "head_ref": head_ref,
+                                   "base_ref": base_ref, "base_sha": self.r["branches"][base_ref],
+                                   "author": self.db.get("token_user", "operator"), "title": title,
+                                   "body": body, "comments": []}
+        self._save()
+        self._lose("create_pull")
+        return n
+
+    def materialize(self, sha, dest, only=None):
+        self._up()
+        written = []
+        for rel, text in self._files(self.r["branches"].get(sha, sha)).items():
+            if only and not rel.startswith(only):
+                continue
+            out = os.path.join(dest, rel)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+            written.append(rel)
+        return written
+
+    def push_commit(self, branch, parent, changes, message, author, base=None, extra_parents=()):
+        import hashlib
+        self._up()
+        now = self.r["branches"].get(branch)
+        if now is not None and now != parent:
+            raise Conflict(f"fixture: {branch} is at {now}, not at {parent}")
+        files = dict(self._files(base or parent))
+        for path, ch in changes.items():
+            if ch is None:
+                files.pop(path, None)
+            else:
+                files[path] = ch[0].decode("utf-8")
+        new = "d" + hashlib.sha1(json.dumps([parent, message, files], sort_keys=True).encode()).hexdigest()[:39]
+        self.r["commits"][new] = {"parents": [parent] + list(extra_parents), "files": files,
+                                  "author": author.get("name", ""), "message": message}
+        self.r["branches"][branch] = new
+        for p in self.r["pulls"].values():
+            if p.get("head_ref") == branch and p.get("state") == "open":
+                p["head_sha"] = new
+        self._save()
+        self._lose("push_commit")
         return new
 
 

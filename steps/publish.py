@@ -73,7 +73,8 @@ def main(argv):
                     raise
                 skipped.append("state comment had been added; the answer was lost")
         head = frame.get("head_sha")
-        if head:
+        # a run that pushed a new head leaves the judged head's status as it was
+        if head and st.get("publish_status", True):
             state = STATUS.get(st.get("verdict") or "", "pending")
             desc = f"{st.get('verdict') or 'undecided'} · {st['phase']} · {st.get('progress')}"
             if st["execution"]["status"] != "OK":
@@ -114,6 +115,7 @@ def main(argv):
                       "verdict": st.get("verdict") or "UNDECIDED", "phase": st["phase"],
                       "progress": st.get("progress") or "",
                       "next": f"{w.get('need', '')} (owner: {w.get('owner', '')})" if w else "",
+                      "wait": w.get("reason", "") if w else "", "owner": w.get("owner", "") if w else "",
                       "error": err}, ensure_ascii=False))
     return 0
 
@@ -122,5 +124,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
     except Exception as e:
-        print(json.dumps({"status": "TOOL_FAILURE", "published": "no", "evidence_index": "",
+        print(json.dumps({"status": "TOOL_FAILURE", "published": "no", "evidence_index": "", "wait": "", "owner": "",
                           "error": f"{type(e).__name__}: {e}"[:300]}))

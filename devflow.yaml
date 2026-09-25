@@ -5,8 +5,18 @@
 #   evaluate ──need models──▶ route ─ROUTE─▶ review_plan ─▶ reviews ─┐
 #      │                        └─HOLD──────────────────────────────┤
 #      └────────────────────────────────────────────────────────────▶ adjudicate
-#   adjudicate ─PASS on head / done─▶ integrate ─┐
-#      └───────────────────────────────────────▶ publish ─▶ record ─▶ ended_*
+#   adjudicate ─▶ act ─prepare/implement─▶ route_impl ─ROUTE─▶ work ─▶ prepare_agent ─▶ proceed ─┐
+#                  │                                            └──────▶ implement_agent ◀──────┤
+#                  │                                                          └─▶ deliver ◀──────┘
+#                  ├─rebase──────────────────────────────────────▶ work ─────▶ deliver ─┐
+#                  ├─PASS on head / done─▶ integrate ────────────────────────────────────┤
+#                  └───────────────────────────────────────────────────────────────────▶ publish ─▶ record ─▶ ended_*
+#
+# act decides whether devflow's own implementer acts in this pass (the project's policy says
+# `implement.by: agent`, the verdict sent the task to implementation, rounds are left). Its model
+# steps run as the principal devflow-implementer; what they wrote is checked against the canonical
+# rules, the project's generators run, and one commit is pushed to devflow/<task id> — which ends
+# the pass, waiting for CI on that head. The next pass (devflow-auto starts it) judges it.
 #
 # Every edge is decided deterministically from a step's output (no model chooses a route).
 workflow:
@@ -42,9 +52,14 @@ workflow:
       required: false
       default: devflow-reviewer
       description: the principal a model review runs as
+    impl_profile:
+      type: string
+      required: false
+      default: research-default
+      description: execution profile for devflow's implementer (its call limit is the profile's)
   limits:
-    max_iterations: 20
-    timeout_seconds: 2400
+    max_iterations: 30
+    timeout_seconds: 7200
 
 agents:
   - name: evaluate
@@ -138,8 +153,136 @@ agents:
       model_calls: {type: number}
       error: {type: string}
     routes:
+      - to: act
+
+  - name: act
+    type: script
+    description: Whether devflow's own implementer acts on the task in this pass (deterministic)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/act.py"]
+    output:
+      do: {type: string}
+      why: {type: string}
+      error: {type: string}
+    routes:
+      - to: route_impl
+        when: "{{ act.output.do in ['prepare', 'implement'] }}"
+      - to: work
+        when: "{{ act.output.do == 'rebase' }}"
       - to: integrate
         when: "{{ adjudicate.output.integrate == 'yes' or adjudicate.output.phase == 'done' }}"
+      - to: publish
+
+  - name: route_impl
+    type: script
+    description: Quota admission for the implementer (a HOLD leaves the task waiting for implementation)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/stack/steps/route.py", "{{ workflow.input.impl_profile }}"]
+    output:
+      decision: {type: string}
+      provider: {type: string}
+      reason: {type: string}
+      evaluated: {type: string}
+      model_route: {type: string}
+      login: {type: string}
+      profile: {type: string}
+      evidence_dir: {type: string}
+    routes:
+      - to: work
+        when: "{{ route_impl.output.decision == 'ROUTE' }}"
+      - to: publish
+
+  - name: work
+    type: script
+    description: The implementer's checkout, reference material, feedback and instructions for this round
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/work.py", "{{ workflow.input.project }}", "{{ act.output.do }}"]
+    timeout: 900
+    output:
+      status: {type: string}
+      stage: {type: string}
+      workspace: {type: string}
+      prompt_prepare: {type: string}
+      prompt_implement: {type: string}
+      round: {type: number}
+      error: {type: string}
+    routes:
+      - to: prepare_agent
+        when: "{{ work.output.status == 'OK' and work.output.stage == 'prepare' }}"
+      - to: implement_agent
+        when: "{{ work.output.status == 'OK' and work.output.stage == 'implement' }}"
+      - to: deliver
+        when: "{{ work.output.status == 'OK' and work.output.stage == 'rebase' }}"
+      - to: publish
+
+  - name: prepare_agent
+    type: script
+    description: 준비 — criteria mapping, research record and trace, as devflow-implementer
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
+           "{{ route_impl.output.model_route }}", "prepare", "{{ work.output.prompt_prepare }}",
+           "devflow/prepare.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
+           "devflow-implementer"]
+    timeout: 3700
+    output:
+      status: {type: string}
+      produced: {type: boolean}
+      provider: {type: string}
+      run_id: {type: string}
+      failure: {type: string}
+    routes:
+      - to: proceed
+
+  - name: proceed
+    type: script
+    description: Whether preparation settled enough to implement (its own answer, from this attempt's file)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/proceed.py", "{{ prepare_agent.output.produced }}"]
+    output:
+      proceed: {type: string}
+      why: {type: string}
+    routes:
+      - to: implement_agent
+        when: "{{ proceed.output.proceed == 'yes' }}"
+      - to: deliver
+
+  - name: implement_agent
+    type: script
+    description: 구현 — the change and its tests, as devflow-implementer
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
+           "{{ route_impl.output.model_route }}", "implement", "{{ work.output.prompt_implement }}",
+           "devflow/implement.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
+           "devflow-implementer"]
+    timeout: 3700
+    output:
+      status: {type: string}
+      produced: {type: boolean}
+      provider: {type: string}
+      run_id: {type: string}
+      failure: {type: string}
+    routes:
+      - to: deliver
+
+  - name: deliver
+    type: script
+    description: Scope by the canonical rules, the project's generators, one commit on devflow/<task>, its pull request (guarded)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/deliver.py", "{{ workflow.input.project }}", "{{ work.output.stage }}",
+           "{% if prepare_agent is defined %}{{ prepare_agent.output.produced }}{% endif %}",
+           "{% if prepare_agent is defined %}{{ prepare_agent.output.run_id }}{% endif %}",
+           "{% if implement_agent is defined %}{{ implement_agent.output.produced }}{% endif %}",
+           "{% if implement_agent is defined %}{{ implement_agent.output.run_id }}{% endif %}"]
+    timeout: 1500
+    output:
+      status: {type: string}
+      delivered: {type: string}
+      head: {type: string}
+      pr: {type: string}
+      hold: {type: string}
+      failure: {type: string}
+      error: {type: string}
+    routes:
       - to: publish
 
   - name: integrate
@@ -173,6 +316,8 @@ agents:
       phase: {type: string}
       progress: {type: string}
       next: {type: string}
+      wait: {type: string}
+      owner: {type: string}
       error: {type: string}
     routes:
       - to: record
@@ -191,7 +336,7 @@ agents:
       record_error: {type: string}
     routes:
       - to: ended_tool_failure
-        when: "{{ adjudicate.output.status == 'TOOL_FAILURE' or publish.output.status == 'TOOL_FAILURE' or (integrate is defined and integrate.output.status == 'TOOL_FAILURE') }}"
+        when: "{{ adjudicate.output.status == 'TOOL_FAILURE' or publish.output.status == 'TOOL_FAILURE' or (integrate is defined and integrate.output.status == 'TOOL_FAILURE') or (work is defined and work.output.status == 'TOOL_FAILURE') or (deliver is defined and deliver.output.status == 'TOOL_FAILURE') }}"
       - to: ended_done
         when: "{{ publish.output.phase == 'done' }}"
       - to: ended_verdict
@@ -211,7 +356,7 @@ agents:
   - name: ended_tool_failure
     type: terminate
     status: failed
-    reason: "TOOL_FAILURE (verdict {{ adjudicate.output.verdict }}): {{ adjudicate.output.error }} {{ publish.output.error }}"
+    reason: "TOOL_FAILURE (verdict {{ adjudicate.output.verdict }}): {{ adjudicate.output.error }} {{ publish.output.error }}{% if work is defined %} {{ work.output.error }}{% endif %}{% if deliver is defined %} {{ deliver.output.error }}{% endif %}"
 
 output:
   project: "{{ workflow.input.project }}"
@@ -222,8 +367,12 @@ output:
   phase: "{{ publish.output.phase }}"
   progress: "{{ publish.output.progress }}"
   next: "{{ publish.output.next }}"
+  wait: "{{ publish.output.wait }}"
+  owner: "{{ publish.output.owner }}"
   published: "{{ publish.output.published }}"
   state: "{{ adjudicate.output.state }}"
+  acted: "{{ act.output.do }}: {{ act.output.why }}"
+  delivered: "{% if deliver is defined %}{{ deliver.output.delivered }} {{ deliver.output.head }} PR {{ deliver.output.pr }} {{ deliver.output.failure }}{% endif %}"
   decision: "{{ publish.output.verdict }}"
   mlflow_run_id: "{{ record.output.mlflow_run_id }}"
   record_error: "{{ record.output.record_error }}"

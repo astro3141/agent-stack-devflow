@@ -30,6 +30,7 @@ rule_paths:
   - ".devflow/lenses.yaml"
   - ".devflow/hooks/*"
   - ".devflow/templates/*"
+  - ".devflow/instructions/*"
   - ".github/workflows/*"
   - ".issue-orchestrator/*"
   - ".issue-orchestrator/**"
@@ -199,6 +200,33 @@ shared_artifacts:
     path: collection-plan.tsv
     lock: collection-plan           # OPERATING_POLICY "Merge": item PRs are serialized on the Plan
     dist: dist/collection-plan.tsv
+
+# devflow's own implementer (Profile §5 준비·구현; 작업 템플릿 §7, the AI 작업 지시문). OPERATING_POLICY
+# lets an agent implement and forbids it to merge — merge_by below stays human. What it may push is
+# decided by these canonical rules before every push: rule_paths above are refused, and the hook's
+# path floor refuses an ordinary change to collector/, evaluator/, the registries or the authority
+# documents. Foundation is never implemented by devflow: it is published by a person (flows).
+implement:
+  by: agent
+  max_rounds: 3                     # the first implementation, OPERATING_POLICY's one rework, one rebase
+  instructions:
+    prepare: .devflow/instructions/prepare.md
+    implement: .devflow/instructions/implement.md
+  research_path: ".devflow/tasks/{task}.research.md"
+  # the Plan, the dist collector and the acceptance manifest, from the bindings — the part of
+  # scripts/build_submission.py that writes tracked files. The whole Builder (ZIP, self-test,
+  # ShellCheck) is the CI job scanner-publish, which also fails when a tracked file differs.
+  regenerate:
+    - [python3, -c, "import sys; sys.path.insert(0, 'scripts'); import build_submission as b; b.build_dist()"]
+  regenerate_timeout_s: 600
+  generated: [collection-plan.tsv, dist/collection-plan.tsv, dist/infra-collector.sh, docs/ACCEPTANCE_MANIFEST.md]
+  # read-only reference for preparation: how earlier assessments collected what an item asks.
+  # Never a criterion (TD §0.1, C13) — corpus/README.md on that branch says so.
+  references:
+    - as: legacy
+      ref: reference/legacy-corpus
+      path: corpus/original/
+      note: "legacy assessment scripts (2014–2024), read-only; never a criterion, never run, never copied (TD §0.1)"
 
 integration:
   merge_by: human                   # OPERATING_POLICY "Merge": Agent는 merge하지 않는다

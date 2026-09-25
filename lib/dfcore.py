@@ -37,6 +37,19 @@ REVIEW_FENCE = re.compile(r"```devflow-review\s*\n(.*?)\n```", re.S)
 TASK_FENCE = re.compile(r"```devflow\s*\n(.*?)\n```", re.S)
 STATE_RE = re.compile(r"<!-- devflow:state (\{.*?\}) -->", re.S)
 
+# The implementer devflow runs: a principal of this package (principals.yaml), and the author of
+# every commit it pushes. The commit author is a label, not a credential — an implementation is
+# attributed to it only for commits the published state records devflow pushing.
+IMPLEMENTER = "devflow-implementer"
+IMPLEMENTER_EMAIL = "devflow-implementer@devflow.invalid"
+IMPLEMENTER_AUTHORS = {IMPLEMENTER, IMPLEMENTER_EMAIL}
+PR_MARK = "<!-- devflow:pr"
+
+
+def task_branch(task):
+    """The branch devflow implements a task on: devflow/<task id>, in git's safe characters."""
+    return "devflow/" + re.sub(r"[^a-z0-9._-]+", "-", str(task.get("id", "")).lower()).strip("-.")
+
 # CI conclusions, sorted by what they say. A failed check is a statement about the code; a
 # cancelled or timed-out one is a statement about the machinery, and says nothing about the code.
 CHECK_OK = {"success"}
@@ -588,8 +601,8 @@ def adjudicate(ctx):
                 "delivery evidence is on the merge commit"))
         return out("done", "PASS", progress="stopped")
 
-    # 3. does an implementation exist?
-    if not pr or not pr.get("head_sha") or pr.get("head_sha") == pr.get("base_sha"):
+    # 3. does an implementation exist? (a head holding only preparation is not one)
+    if not pr or not pr.get("head_sha") or pr.get("head_sha") == pr.get("base_sha") or ctx.get("prepare_only"):
         flow = ctx.get("flow") or {}
         return out("implement", None, wait=wait(
             "implementation",

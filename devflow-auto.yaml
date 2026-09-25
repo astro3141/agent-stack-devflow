@@ -1,0 +1,91 @@
+# devflow-auto: take one task as far as devflow can without a person.
+#
+# It runs `devflow` passes one after another — each an ordinary run with its own id, record and
+# published state — and stops when the next move is someone else's: a decision, a gate, a merge, a
+# hold label, a failure of the machinery, or no progress between two passes. While CI runs on a head
+# devflow pushed, it waits and passes again. Starting it again resumes: every pass reads GitHub.
+#
+#   run_workflow.py start <id> devflow-auto research-default project=<p> issue=<n>
+workflow:
+  name: devflow-auto
+  description: Run devflow passes over one task until a person or CI has the next move
+  entry_point: drive
+  input:
+    profile:
+      type: string
+      required: false
+      default: research-default
+      description: execution profile for the model reviews
+    project:
+      type: string
+      required: true
+      description: a project registered in config/devflow/projects/<project>.yaml
+    issue:
+      type: string
+      required: true
+      description: the task's issue number
+    impl_profile:
+      type: string
+      required: false
+      default: research-default
+      description: execution profile for devflow's implementer
+    review_mode:
+      type: string
+      required: false
+      default: model
+      description: "model | external"
+    max_passes:
+      type: string
+      required: false
+      default: "12"
+      description: at most this many passes
+    poll_s:
+      type: string
+      required: false
+      default: "120"
+      description: seconds between passes while CI runs
+    max_wait_s:
+      type: string
+      required: false
+      default: "3600"
+      description: stop waiting for CI on one head after this long
+  limits:
+    max_iterations: 4
+    timeout_seconds: 43200
+
+agents:
+  - name: drive
+    type: script
+    description: Start passes until the next move is not devflow's
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/drive.py", "{{ workflow.input.project }}", "{{ workflow.input.issue }}",
+           "{{ workflow.input.profile }}", "{{ workflow.input.impl_profile }}", "{{ workflow.input.review_mode }}",
+           "{{ workflow.input.max_passes }}", "{{ workflow.input.poll_s }}", "{{ workflow.input.max_wait_s }}"]
+    timeout: 43000
+    output:
+      status: {type: string}
+      passes: {type: number}
+      stopped: {type: string}
+      verdict: {type: string}
+      phase: {type: string}
+      next: {type: string}
+      last_run: {type: string}
+      runs: {type: string}
+    routes:
+      - to: ended
+
+  - name: ended
+    type: terminate
+    status: success
+    reason: "{{ drive.output.passes }} pass(es) · {{ drive.output.verdict or 'undecided' }} · {{ drive.output.phase }} — stopped: {{ drive.output.stopped }}"
+
+output:
+  project: "{{ workflow.input.project }}"
+  issue: "{{ workflow.input.issue }}"
+  passes: "{{ drive.output.passes }}"
+  runs: "{{ drive.output.runs }}"
+  verdict: "{{ drive.output.verdict }}"
+  phase: "{{ drive.output.phase }}"
+  next: "{{ drive.output.next }}"
+  stopped: "{{ drive.output.stopped }}"
+  decision: "{{ drive.output.verdict }}"

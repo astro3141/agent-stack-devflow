@@ -11,9 +11,10 @@
 # other.
 name: devflow
 version: 0.1.0
-description: Development workflow — evaluate a task on GitHub, review it, judge it, integrate it
+description: Development workflow — prepare, implement, review, judge and integrate a task on GitHub
 workflows:
-  devflow: devflow.yaml
+  devflow: devflow.yaml            # one pass over a task: judge it, and act on it when devflow may
+  devflow-auto: devflow-auto.yaml  # passes, one after another, until a person or CI has the next move
 requires:
   # egress: the remote (GitHub) and the model providers. tool_rights: a model review writes its
   # file through Preloop under the reviewer principal. Admission is deliberately not required at
@@ -21,12 +22,28 @@ requires:
   # "no model review in this run" (the reviews stay missing and the state says so) — not a refusal
   # of a run that may need no model at all.
   capabilities: [tool_rights, egress]
-  principals: [devflow-reviewer]
+  principals: [devflow-reviewer, devflow-implementer]
   # What this package needs in the environment, declared so the operator is told before a run
   # instead of by a step's error several minutes in. Names and purposes only: the value is the
   # operator's, it arrives from a git-ignored file on the host, and nothing here ever reads it
   # (agent-stack OPERATIONS §43). A run against the fixture remote needs none of this.
+  #
+  # GitHub needs one of the two: the Client ID behind the panel's 연결 (below), or a token.
   env:
-    - name: DEVFLOW_GITHUB_TOKEN
-      purpose: read the project's issues and pull requests, write reviews and statuses
+    - name: DEVFLOW_GITHUB_CLIENT_ID
+      purpose: the Client ID of the GitHub App (or OAuth App) the 연결 button logs in through — not a secret
       file: docker/package.env
+    - name: DEVFLOW_GITHUB_TOKEN
+      purpose: instead of 연결 — a token to read the project's issues and pull requests, push devflow's branch, write reviews and statuses
+      file: docker/package.env
+
+# GitHub, connected from the panel (OPERATIONS §44): the operator presses 연결, opens GitHub's page,
+# types the code the panel shows. steps/github_login.py runs that device flow and writes token.json
+# into this login's directory; only devflow's steps read it (lib/ghauth.py), and a token that
+# expires is refreshed there. DEVFLOW_GITHUB_TOKEN in docker/package.env still works instead.
+login:
+  purpose: GitHub — read the task, push devflow's branch, open its pull request, publish the verdict
+  argv: [/opt/venv/bin/python, /work/packages/devflow/steps/github_login.py]
+  home_env: [DEVFLOW_GITHUB_HOME]
+  done_when:
+    file: token.json

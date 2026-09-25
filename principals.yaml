@@ -26,3 +26,29 @@ principals:
           condition_type: simple
           condition_expression: ""
           rule_description: a reviewer changes nothing it reads
+
+  devflow-implementer:
+    description: >
+      devflow's implementer. Writes the task's change in the run's checkout (/ws/<run>/repo/) and its
+      own report (devflow/prepare.json, devflow/implement.json) — nothing else. Which paths of the
+      project it may change is decided again, by the project's canonical rules, before anything is
+      pushed (steps/deliver.py); this right only keeps it inside its own workspace.
+    tool_rules:
+      write_file:
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/repo/') || args.path.endsWith('/devflow/prepare.json') || args.path.endsWith('/devflow/implement.json')"
+          rule_description: the implementer writes the checkout and its own report
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+      edit_file:
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/repo/')"
+          rule_description: the implementer edits the checkout
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
