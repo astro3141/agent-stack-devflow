@@ -187,7 +187,8 @@ reviews:
   # limit and produced nothing. The number of reviewers is a time and cost choice, not a quality one.
   assignment: per_lens
   retries: 1                        # one more attempt for a reviewer that timed out or failed (measured: one of four timed out)
-  budget: {model_calls: 8}          # per task, across its runs — two rounds of four lenses
+  budget: {model_calls: 14}         # per task, across its runs — two per_lens rounds of four, or a
+                                    # research task's two-model reviews with a retry each, and margin
   # A research or survey record is reviewed by two different model families, each lens completed by
   # both: claude, as devflow-research-reviewer with the author's hosts and reference material, checks
   # the facts against their primary pages; codex, which cannot run as a role (agent-stack §48),

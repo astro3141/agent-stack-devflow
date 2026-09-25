@@ -706,7 +706,7 @@ def controls_evidence():
     s = Sim(copy.deepcopy(base))
     try:
         s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
-            {"id": 77, "user": "devflow", "body": '<!-- devflow:state {"history":{"model_calls":6}} -->'}))
+            {"id": 77, "user": "devflow", "body": '<!-- devflow:state {"history":{"model_calls":14}} -->'}))
         r = s.run(review_mode="model")
         ev = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json")))
         check("the model budget spent: no model review, the assignment waits for a person",
@@ -1228,9 +1228,9 @@ def controls_implement():
         prompt = open(next(a["prompt"] for a in ev2["assignments"] if a.get("prompt")), encoding="utf-8").read()
         check("and it is told the hosts it may fetch from — the researcher's",
               ("packages.ubuntu.com" in prompt and "{WEB}" not in prompt), True)
-        check("two models review it: claude as the research reviewer, codex as the ordinary reviewer",
+        check("two models review it: claude as the research reviewer, codex as the ordinary reviewer — labels inside the review_r write rule",
               sorted((a["reviewer"], a.get("provider"), a.get("principal")) for a in ev2["assignments"]),
-              [("m1-claude", "claude", "devflow-research-reviewer"), ("m2-codex", "codex", "")])
+              [("r1-claude", "claude", "devflow-research-reviewer"), ("r2-codex", "codex", "")])
         plan = json.load(open(os.path.join(r2["ws"], "devflow", "review_plan.json"), encoding="utf-8")) \
             if os.path.isfile(os.path.join(r2["ws"], "devflow", "review_plan.json")) else None
         env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(r2["ws"])}

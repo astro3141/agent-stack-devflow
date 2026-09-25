@@ -382,7 +382,11 @@ def main(argv):
         # research lane the claude reviewer is the research reviewer, with the author's hosts; a
         # model that cannot run as a role (agent-stack §48) reviews as the ordinary reviewer.
         models = list(rv.get("models") or ["claude", "codex"])[:need_models]
-        assignments = [{"reviewer": f"m{i}-{m}", "lenses": sorted(chosen), "independent": False,
+        # the reviewer's label names the review file (review_<label>.json), and every reviewer
+        # principal's write rule allows exactly the review_r prefix — a label that drops the r
+        # renames the file out of its author's own rights (measured: a finished review, written
+        # against nine fetched primary pages, DENIED at the write)
+        assignments = [{"reviewer": f"r{i}-{m}", "lenses": sorted(chosen), "independent": False,
                         "provider": m,
                         "principal": dfcore.RESEARCH_REVIEWER if (m == "claude" and ev.get("lane") == "research") else ""}
                        for i, m in enumerate(models, 1)]
