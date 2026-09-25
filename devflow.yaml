@@ -62,8 +62,8 @@ workflow:
     impl_profile:
       type: string
       required: false
-      default: research-default
-      description: execution profile for devflow's implementer (its call limit is the profile's)
+      default: long-task
+      description: execution profile for devflow's implementer and researcher — claude only (they run as roles, which the Codex CLI cannot; agent-stack §48)
   limits:
     max_iterations: 30
     timeout_seconds: 10800

@@ -27,8 +27,8 @@ workflow:
     impl_profile:
       type: string
       required: false
-      default: research-default
-      description: execution profile for devflow's implementer
+      default: long-task
+      description: execution profile for devflow's implementer and researcher — claude only (they run as roles, which the Codex CLI cannot; agent-stack §48)
     review_mode:
       type: string
       required: false
