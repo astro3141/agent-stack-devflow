@@ -188,6 +188,13 @@ reviews:
   assignment: per_lens
   retries: 1                        # one more attempt for a reviewer that timed out or failed (measured: one of four timed out)
   budget: {model_calls: 8}          # per task, across its runs — two rounds of four lenses
+  # A research or survey record is reviewed by two different model families, each lens completed by
+  # both: claude, as devflow-research-reviewer with the author's hosts and reference material, checks
+  # the facts against their primary pages; codex, which cannot run as a role (agent-stack §48),
+  # reviews the same frozen materials as a second model. Different models are not independence — a
+  # separate identity is — but one model is not wrong the same way twice.
+  distinct_models: {research: 2, survey: 2}
+  models: [claude, codex]
 
 loop:
   max_rework: 1                     # OPERATING_POLICY "Rework": automatic rework at most once

@@ -946,6 +946,7 @@ def impl_db(by="agent", max_rounds=3, task_type=None):
 
     def pol(p):
         p["task_types"] = list(p.get("task_types") or []) + ["research", "survey"]
+        p.setdefault("reviews", {})["distinct_models"] = {"research": 2, "survey": 2}
         if not by:
             p.pop("implement", None)
         else:
@@ -1227,6 +1228,29 @@ def controls_implement():
         prompt = open(next(a["prompt"] for a in ev2["assignments"] if a.get("prompt")), encoding="utf-8").read()
         check("and it is told the hosts it may fetch from — the researcher's",
               ("packages.ubuntu.com" in prompt and "{WEB}" not in prompt), True)
+        check("two models review it: claude as the research reviewer, codex as the ordinary reviewer",
+              sorted((a["reviewer"], a.get("provider"), a.get("principal")) for a in ev2["assignments"]),
+              [("m1-claude", "claude", "devflow-research-reviewer"), ("m2-codex", "codex", "")])
+        plan = json.load(open(os.path.join(r2["ws"], "devflow", "review_plan.json"), encoding="utf-8")) \
+            if os.path.isfile(os.path.join(r2["ws"], "devflow", "review_plan.json")) else None
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(r2["ws"])}
+        step("review_plan.py", ["claude", "claude", "direct", "devflow-reviewer"], env)
+        plan = json.load(open(os.path.join(r2["ws"], "devflow", "review_plan.json"), encoding="utf-8"))
+        check("and each runs on its own model, with its own login and principal",
+              sorted((m["steps"][0]["provider"], m["steps"][0]["login"], m["steps"][0]["principal"]) for m in plan["members"]),
+              [("claude", "claude", "devflow-research-reviewer"), ("codex", "codex", "devflow-reviewer")])
+
+        def one_person_review(db):
+            h = branch_of(db)
+            n = str(r2["state"]["history"]["pr"])
+            R(db).setdefault("reviews", {})[n] = [{"id": 950, "user": "rev-person", "commit_id": h, "state": "COMMENTED",
+                                                  "body": build.review_body(h, ["base", "research-record"], digest=canonical_digest(db),
+                                                                            basis=canonical_basis(db))}]
+        s.edit(one_person_review)
+        r3 = s.run_pass(research_model)
+        check("one complete review is one model: the lens is not complete until a second model completes it",
+              ((r3["state"].get("reviews") or {}).get("status"), any("fewer than 2 different models" in n for n in r3["state"].get("notes") or [])),
+              ("incomplete", True))
         check("and the lenses that may read it must read it — it is there",
               ("cited" in ev2["lens_defs"]["base"]["read"], "cited" in ev2["lens_defs"]["research-record"]["read"]), (True, True))
     finally:

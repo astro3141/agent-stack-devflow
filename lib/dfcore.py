@@ -412,6 +412,20 @@ def assign_reviewers(chosen, pol, classification):
     return groups
 
 
+def review_model(r):
+    """The model family a counted review came from — the provider of a model review (from the
+    receipt, never from the text), or `human` for a person's."""
+    who = r.get("reviewer") or {}
+    return who.get("provider") or ("human" if who.get("kind", "human") == "human" else "model")
+
+
+def distinct_models_needed(pol, task_type):
+    """How many different model families must have completed each lens (`reviews.distinct_models`,
+    by task type; 1 when the policy says nothing). Not independence — a separate identity is that —
+    but a guard against one model being wrong the same way twice."""
+    return max(1, int(((pol.get("reviews") or {}).get("distinct_models") or {}).get(task_type) or 1))
+
+
 # ------------------------------------------------------------------------------ reviews
 def parse_review(body):
     m = REVIEW_FENCE.search(body or "")
@@ -640,10 +654,17 @@ def adjudicate(ctx):
     required = list(rv.get("required") or [])
     valid = [r for r in rv.get("results") or [] if r.get("valid")]
     covered, unverified = set(), {}
+    need_models = int(rv.get("distinct_models") or 1)
+    by_lens = {}
     for r in valid:
-        covered |= set(r["complete"])
+        for l in r["complete"]:
+            by_lens.setdefault(l, set()).add(review_model(r))
         for lid, u in (r.get("unverified") or {}).items():
             unverified.setdefault(lid, u)
+    covered = {l for l, models in by_lens.items() if len(models) >= need_models}
+    short = {l: sorted(m) for l, m in by_lens.items() if l in required and len(m) < need_models}
+    if short:
+        notes.append(f"lenses completed by fewer than {need_models} different models: {short}")
     missing = [l for l in required if l not in covered and l not in unverified]
     unverified = {l: u for l, u in unverified.items() if l not in covered}
     indep_lenses = set(rv.get("independent_lenses") or [])

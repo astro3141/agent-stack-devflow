@@ -29,9 +29,12 @@ def main(argv):
     for a in ev.get("assignments") or []:
         if a.get("by") != "model" or not a.get("prompt"):
             continue
+        # an assignment that names its model (reviews.distinct_models) runs on that model, with that
+        # model's login, as the principal the assignment names — or the reviewer given here
+        own = a.get("provider")
         member = {"label": a["reviewer"], "steps": [{
-            "kind": "model", "provider": provider, "login": login, "route": route,
-            "prompt": a["prompt"], "expected": a["expected"], "principal": principal}]}
+            "kind": "model", "provider": own or provider, "login": own or login, "route": route,
+            "prompt": a["prompt"], "expected": a["expected"], "principal": a.get("principal") or principal}]}
         # a member that did not produce (a failure or a time-out, never a denial) may be run again,
         # as many times as the project's policy says — the platform counts every attempt
         if int(a.get("retries") or 0) > 0:

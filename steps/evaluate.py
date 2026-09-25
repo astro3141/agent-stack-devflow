@@ -375,6 +375,17 @@ def main(argv):
     chosen, why_chosen = dfcore.select_lenses(base_lenses, lenses, cls)
     assignments = dfcore.assign_reviewers(chosen, pol, cls)
     rv = pol.get("reviews") or {}
+    need_models = dfcore.distinct_models_needed(pol, task.get("type"))
+    if need_models > 1:
+        # a lens is complete only when that many different models completed it: one assignment per
+        # model, each carrying the lenses (its own reviewer label, provider and principal). On the
+        # research lane the claude reviewer is the research reviewer, with the author's hosts; a
+        # model that cannot run as a role (agent-stack §48) reviews as the ordinary reviewer.
+        models = list(rv.get("models") or ["claude", "codex"])[:need_models]
+        assignments = [{"reviewer": f"m{i}-{m}", "lenses": sorted(chosen), "independent": False,
+                        "provider": m,
+                        "principal": dfcore.RESEARCH_REVIEWER if (m == "claude" and ev.get("lane") == "research") else ""}
+                       for i, m in enumerate(models, 1)]
     indep_lenses = sorted({l for a in assignments if a["independent"] for l in a["lenses"]})
     independent_needed = bool(indep_lenses)
     results = []
@@ -402,11 +413,20 @@ def main(argv):
             v["source"] = f"accepted:{acc.get('run')}"
             results.append(v)
     covered = {l for r in results if r.get("valid") for l in r["complete"]}
+    covered_by = {}
+    for r in results:
+        if r.get("valid"):
+            for l in r["complete"]:
+                covered_by.setdefault(l, set()).add(dfcore.review_model(r))
     indep_covered = {l for r in results if r.get("valid") and r["independent"] for l in r["complete"]}
     budget = rv.get("budget") or {}
     used = int(ev["history"].get("model_calls") or 0)
     for a in assignments:
-        need = [l for l in a["lenses"] if l not in (indep_covered if a["independent"] else covered)]
+        if a.get("provider"):
+            # this model's own coverage: another model's review does not fill its slot
+            need = [l for l in a["lenses"] if a["provider"] not in covered_by.get(l, set())]
+        else:
+            need = [l for l in a["lenses"] if l not in (indep_covered if a["independent"] else covered)]
         a["missing"] = need
         a["retries"] = int(rv.get("retries") or 0)
         a["by"] = "done" if not need else ("model" if review_mode == "model" else "external")
@@ -437,7 +457,8 @@ def main(argv):
     ev["lens_defs"] = chosen
     ev["prior_accepted"] = [a for a in prior.get("accepted_reviews") or [] if a.get("frame_id") == frame["id"]]
     ev["reviews"] = {"required": list(chosen), "why": why_chosen, "results": results,
-                     "independent_needed": independent_needed, "independent_lenses": indep_lenses}
+                     "independent_needed": independent_needed, "independent_lenses": indep_lenses,
+                     "distinct_models": need_models}
     ev["assignments"] = assignments
     ev["history"]["max_rounds"] = int(rv.get("max_rounds") or 3)
 
@@ -576,8 +597,9 @@ def write_prompt(a, chosen, frame, ev):
                .replace("{HEAD}", str(frame["head_sha"])).replace("{FRAME}", frame["id"])
                .replace("{POLICY}", frame["policy"]["digest"])
                .replace("{BASIS}", frame["basis"])
-               .replace("{WEB}", refs.web_hosts(dfcore.RESEARCH_REVIEWER, PKG) if ev.get("lane") == "research"
-                        else "none — this review has no web tools")
+               .replace("{WEB}", refs.web_hosts(dfcore.RESEARCH_REVIEWER, PKG)
+                        if (ev.get("lane") == "research" and a.get("principal") == dfcore.RESEARCH_REVIEWER)
+                        else "none — this review has no page fetching; search results, where your tools have them, are secondary sources")
                .replace("{MATERIALS}", os.path.join(D, "materials"))
                .replace("{OUT}", os.path.join(WS, f"review_{a['reviewer']}.json")))
     p = os.path.join(D, f"prompt_{a['reviewer']}.md")
