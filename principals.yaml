@@ -9,12 +9,12 @@
 # who implemented the change; a different model or vendor is never counted as independence.
 principals:
   devflow-reviewer:
-    # No `egress:` on purpose (agent-stack §48). Declaring it — even `egress: []`, "the providers and
-    # nothing else" — runs a review as this role's own uid behind its own proxy, and the Codex CLI
-    # cannot run under a uid other than the one that installed it: the step is refused by name.
-    # Reviews route over claude and codex (research-default), so declaring it here would refuse the
-    # codex lanes. A reviewer reads frozen materials and has no web tool without asking, so what the
-    # shared list holds open is not something its work uses.
+    # The providers and nothing else: a reviewer reads frozen materials, so what the shared list
+    # holds open for other packages (GitHub included) is not something its work uses. Brokered
+    # (agent-stack §53–§55): the review runs in the `closed` profile's container on its own network,
+    # which every vendor's CLI tolerates — the uid problem that once refused codex here is gone by
+    # construction, measured on all three vendors (§55).
+    egress_profile: closed
     description: >
       devflow's model reviewer. Reads the frozen review materials; writes only its own review file.
     tool_rules:
@@ -34,12 +34,14 @@ principals:
           rule_description: a reviewer changes nothing it reads
 
   devflow-implementer:
-    # The providers and nothing else (agent-stack §48): the implementer builds on research records
-    # the research lane wrote and a reviewer passed, so it fetches nothing itself — and cannot reach
-    # what the shared list holds open for other packages, GitHub included (devflow's scripts do the
-    # GitHub work). Its steps must run on claude (impl_profile long-task): the Codex CLI cannot run
-    # as a role.
-    egress: []
+    # The providers and nothing else: the implementer builds on research records the research lane
+    # wrote and a reviewer passed, so it fetches nothing itself — and cannot reach what the shared
+    # list holds open for other packages, GitHub included (devflow's scripts do the GitHub work).
+    # Brokered into the `closed` profile (agent-stack §53–§55). Its steps still run on claude only
+    # (impl_profile long-task) — not confinement any more, but codex's own writing: it reached for
+    # its own edit tool (which waits for a person) and its one MCP-written file held "undefined"
+    # (both measured 2026-09-25).
+    egress_profile: closed
     description: >
       devflow's implementer. Writes the task's change in the run's checkout (/ws/<run>/repo/) and its
       own report (devflow/prepare.json, devflow/implement.json) — nothing else. Which paths of the
@@ -76,18 +78,12 @@ principals:
           rule_description: and nothing else
 
   devflow-researcher:
-    # The research lane's role (task types research and survey). Its hosts are primary sources for
-    # how an operating system packages a product: the distributions' package indexes and their
-    # vendors' documentation. Only WebFetch is held to them — WebSearch runs at the provider, which
-    # no proxy here can limit. Claude only, for the same reason as the implementer.
-    egress:
-      - packages.ubuntu.com
-      - packages.debian.org
-      - dl.rockylinux.org
-      - docs.rockylinux.org
-      - vault.centos.org
-      - access.redhat.com
-      - docs.redhat.com
+    # The research lane's role (task types research and survey). Its profile's hosts are primary
+    # sources for how an operating system packages a product: the distributions' package indexes and
+    # their vendors' documentation (agent-stack docker/egress/profiles/research.allow). Only WebFetch
+    # is held to them — WebSearch runs at the provider, which no proxy here can limit. Claude only
+    # (impl_profile long-task): codex's own writing failed twice, measured 2026-09-25.
+    egress_profile: research
     description: >
       devflow's researcher. Writes the research record in the run's checkout (/ws/<run>/repo/) and its
       own report (devflow/research.json) — nothing else. Which paths it may change is decided again,
@@ -120,16 +116,11 @@ principals:
     # Reviews what the research lane wrote, given what its author was given: the same hosts (a record
     # of facts from the web is checked against the web, not only for its form — measured: a reviewer
     # without them could check provenance and consistency and nothing else), the same reference
-    # material and the criterion's own words. An identity of its own, never the researcher's. Claude
-    # only (impl_profile long-task): the Codex CLI cannot run as a role (agent-stack §48).
-    egress:
-      - packages.ubuntu.com
-      - packages.debian.org
-      - dl.rockylinux.org
-      - docs.rockylinux.org
-      - vault.centos.org
-      - access.redhat.com
-      - docs.redhat.com
+    # material and the criterion's own words. An identity of its own, never the researcher's — and a
+    # *profile* of its own with the same list (research-review.allow), because two roles in one
+    # profile can steal each other's live job tokens (agent-stack §54), and the reviewer judging the
+    # researcher is exactly the pair that must not.
+    egress_profile: research-review
     description: >
       devflow's reviewer for research records. Reads the frozen materials and the listed hosts; writes
       only its own review file.

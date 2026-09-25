@@ -20,10 +20,12 @@
 # the pass, waiting for CI on that head. The next pass (devflow-auto starts it) judges it.
 #
 # Research is a lane of its own: a task whose type the project routes to `implement.modes`
-# (research, survey) is one model step as devflow-researcher — the only devflow role with web hosts
-# (agent-stack §48) — writing a record into the project's research directory and nothing else. It is
-# reviewed and merged like any change; item tasks then build on the merged records, and their
-# implementer (egress: providers only) fetches nothing itself.
+# (research, survey) is one model step as devflow-researcher — the only devflow role whose egress
+# profile carries web hosts (agent-stack §53–§55) — writing a record into the project's research
+# directory and nothing else. It is reviewed and merged like any change; item tasks then build on
+# the merged records, and their implementer (profile `closed`: the providers only) fetches nothing.
+# Every devflow model step is brokered: its role's profile decides its network, and the broker
+# holds the credential.
 #
 # Every edge is decided deterministically from a step's output (no model chooses a route).
 workflow:
@@ -63,7 +65,7 @@ workflow:
       type: string
       required: false
       default: long-task
-      description: execution profile for devflow's implementer and researcher — claude only (they run as roles, which the Codex CLI cannot; agent-stack §48)
+      description: execution profile for devflow's implementer and researcher — claude only (codex reached for its own edit tool and wrote one file as "undefined", both measured)
   limits:
     max_iterations: 30
     timeout_seconds: 10800

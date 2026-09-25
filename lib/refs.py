@@ -94,16 +94,43 @@ def criteria_text(pol, hook_root, task, repo_dir, dest):
     return written, list(got.get("notes") or [])
 
 
+# Providers every profile carries: a role's *own* hosts are what remains once these are taken out.
+PROVIDER_HOSTS = {"chatgpt.com", "auth.openai.com", "api.openai.com", "api.anthropic.com",
+                  "platform.claude.com", "console.anthropic.com", "claude.ai", "auth.x.ai",
+                  "accounts.x.ai", "api.x.ai", "cli-chat-proxy.grok.com"}
+
+
+def profile_hosts(profile):
+    """The non-provider hosts an egress profile's allowlist names (agent-stack
+    docker/egress/profiles/<profile>.allow, one anchored regex per line), or None when the file is
+    not readable from here."""
+    root = os.environ.get("AGENTSTACK_EGRESS_PROFILES_DIR", "/work/docker/egress/profiles")
+    try:
+        lines = open(os.path.join(root, f"{profile}.allow"), encoding="utf-8").read().splitlines()
+    except OSError:
+        return None
+    hosts = [l.strip().lstrip("^").rstrip("$").replace("\\.", ".")
+             for l in lines if l.strip() and not l.strip().startswith("#")]
+    return [h for h in hosts if h not in PROVIDER_HOSTS]
+
+
 def web_hosts(role, pkg):
-    """The hosts a role may fetch from (its `egress:` in the package's principals.yaml,
-    agent-stack §48) — told to the model, so it does not spend its time on pages the network
-    refuses."""
+    """The hosts a role may fetch from — its egress profile's allowlist (agent-stack §53–§55), or
+    the retired per-role `egress:` list — told to the model, so it does not spend its time on pages
+    the network refuses."""
     try:
         import yaml
         doc = yaml.safe_load(open(os.path.join(pkg, "principals.yaml"), encoding="utf-8")) or {}
-        hosts = ((doc.get("principals") or {}).get(role) or {}).get("egress")
+        spec = (doc.get("principals") or {}).get(role) or {}
     except Exception:
-        hosts = None
+        spec = {}
+    prof = spec.get("egress_profile")
+    if prof:
+        hosts = profile_hosts(str(prof))
+        if hosts is None:
+            return f"the hosts of the {prof!r} egress profile"
+        return ", ".join(hosts) if hosts else "none (the providers only)"
+    hosts = spec.get("egress")
     if hosts is None:
         return "whatever the stack's shared allowlist holds open"
     return ", ".join(hosts) if hosts else "none (the providers only)"

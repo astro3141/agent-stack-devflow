@@ -74,11 +74,14 @@ reached beyond the item. So a project may route task types to a lane of their ow
 | `survey` | a set of items mapped onto the contracts: per item the condition and the contract that could express it by meaning; across items the contract gaps (Foundation proposals, with every item they block), the decisions (grouped by question), the research topics, an order | shared gaps and decisions are found once, before items stop on them one by one |
 | `research` | one topic — a product on the target distributions: packages, units, processes, configuration, the variants that change a result, what the collection lane sees of each, what earlier scripts looked at — every fact with its source and date | implementers build on it instead of redoing it |
 
-The lane is one model step as **`devflow-researcher`**, the only devflow role with web hosts of its
-own (agent-stack §48); it may write only the project's research directory (`writes`), and its record
-is reviewed (lens `research-record`) and merged like any change. Item tasks then cite the merged
-records: their implementer is confined to the providers (`egress: []`) and fetches nothing — a fact
-no record establishes stops preparation with "research needed: …".
+The lane is one model step as **`devflow-researcher`**, whose egress profile (`research`) is the
+only devflow one carrying web hosts (agent-stack §53–§55: every devflow model step is brokered into
+its role's profile container, and the broker holds the credential); it may write only the project's
+research directory (`writes`), and its record is reviewed (lens `research-record`, by
+`devflow-research-reviewer` in a profile of its own with the same hosts) and merged like any change.
+Item tasks then cite the merged records: their implementer is confined to the providers (profile
+`closed`) and fetches nothing — a fact no record establishes stops preparation with
+"research needed: …".
 
 ## devflow implements (준비 · 구현)
 
