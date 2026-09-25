@@ -400,6 +400,7 @@ output:
   issue: "{{ workflow.input.issue }}"
   frame: "{{ evaluate.output.frame }}"
   head: "{{ evaluate.output.head }}"
+  need_models: "{{ evaluate.output.need_models }}"
   verdict: "{{ publish.output.verdict }}"
   phase: "{{ publish.output.phase }}"
   progress: "{{ publish.output.progress }}"

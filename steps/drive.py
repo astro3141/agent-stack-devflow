@@ -67,7 +67,8 @@ def one_pass(run_id, project, issue, profile, impl_profile, review_mode):
     return {"run": run_id, "verdict": out.get("verdict"), "phase": out.get("phase"),
             "progress": out.get("progress"), "wait": out.get("wait"), "owner": out.get("owner"),
             "next": out.get("next"), "acted": out.get("acted"), "delivered": out.get("delivered"),
-            "head": out.get("head"), "state": v.get("state"), "ok": bool(v.get("completed_ok")),
+            "head": out.get("head"), "need_models": out.get("need_models"),
+            "state": v.get("state"), "ok": bool(v.get("completed_ok")),
             "reason": v.get("terminated_reason") or v.get("reason") or ""}
 
 
@@ -87,6 +88,15 @@ def decide(p, prev, waited, max_wait):
         if waited >= max_wait:
             return False, 0, f"CI has not finished after {int(waited)} s"
         return True, -1, "CI is running on the head"
+    # Reviews a model may still supply, and the pass ran none: the router held (a quota observation
+    # that failed transiently held two passes in a row — measured: "Claude OAuth usage endpoint is
+    # rate limited", gone minutes later). That is waiting on the environment, not no-progress:
+    # sleep, then pass again, bounded by max_wait like CI.
+    if w == "review" and p.get("need_models") == "yes":
+        if waited >= max_wait:
+            return False, 0, f"a model may supply the missing reviews, but none could run for {int(waited)} s"
+        return True, -2, "reviews are missing and a model may supply them; waiting for an eligible provider"
+
     def key(x):
         x = x or {}
         return (x.get("verdict"), x.get("phase"), x.get("wait"), x.get("head"), x.get("next"))
@@ -103,11 +113,12 @@ def main(argv):
     project, issue, profile, impl_profile, review_mode = argv[:5]
     max_passes, poll_s, max_wait = int(argv[5]), int(argv[6]), int(argv[7])
     passes, prev, why = [], None, ""
+    held = 0                                  # how long reviews have waited for an eligible provider
     for n in range(1, max_passes + 1):
         run_id = re.sub(r"[^a-z0-9-]", "-", f"{PARENT[:24]}-p{n}".lower())
         p = one_pass(run_id, project, issue, profile, impl_profile, review_mode)
         passes.append(p)
-        go, ci, why = decide(p, prev, 0, max_wait)
+        go, ci, why = decide(p, prev, held, max_wait)
         if not go:
             break
         if ci == -1:                          # CI on a head: wait for it here, then pass again
@@ -118,8 +129,14 @@ def main(argv):
             if not ok:
                 why = f"the checks on {str(head)[:12]} did not settle within {max_wait} s"
                 break
+            held = 0
             prev = None                       # a settled CI is progress, whatever the state text
+        elif ci == -2:                        # no provider could run the reviews: sleep, pass again
+            time.sleep(poll_s)
+            held += poll_s
+            prev = p
         else:
+            held = 0
             prev = p
     else:
         why = f"{max_passes} passes"

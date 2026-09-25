@@ -1284,6 +1284,10 @@ def controls_implement():
     same = {"ok": True, "verdict": None, "phase": "verify_review", "wait": "review", "owner": "reviewer", "head": "h"}
     check("drive: a pass that reached the same state as the last one: stop (no progress)",
           drive.decide(same, dict(same), 0, 1)[0], False)
+    holdable = dict(same, need_models="yes")
+    check("drive: reviews a model may still supply but none ran (router held): wait, then pass again",
+          drive.decide(holdable, dict(holdable), 0, 3600)[:2], (True, -2))
+    check("drive: and that wait is bounded", drive.decide(holdable, dict(holdable), 3600, 3600)[0], False)
 
 
 def controls_auth():
