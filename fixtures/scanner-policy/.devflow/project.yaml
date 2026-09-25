@@ -187,6 +187,7 @@ reviews:
   # limit and produced nothing. The number of reviewers is a time and cost choice, not a quality one.
   assignment: per_lens
   retries: 1                        # one more attempt for a reviewer that timed out or failed (measured: one of four timed out)
+  max_rounds: 6                     # rounds of model review per task; the budget above is what really bounds spend
   budget: {model_calls: 14}         # per task, across its runs — two per_lens rounds of four, or a
                                     # research task's two-model reviews with a retry each, and margin
   # A research or survey record is reviewed by two different model families, each lens completed by
