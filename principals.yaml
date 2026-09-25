@@ -115,3 +115,36 @@ principals:
           condition_type: simple
           condition_expression: ""
           rule_description: and nothing else
+
+  devflow-research-reviewer:
+    # Reviews what the research lane wrote, given what its author was given: the same hosts (a record
+    # of facts from the web is checked against the web, not only for its form — measured: a reviewer
+    # without them could check provenance and consistency and nothing else), the same reference
+    # material and the criterion's own words. An identity of its own, never the researcher's. Claude
+    # only (impl_profile long-task): the Codex CLI cannot run as a role (agent-stack §48).
+    egress:
+      - packages.ubuntu.com
+      - packages.debian.org
+      - dl.rockylinux.org
+      - docs.rockylinux.org
+      - vault.centos.org
+      - access.redhat.com
+      - docs.redhat.com
+    description: >
+      devflow's reviewer for research records. Reads the frozen materials and the listed hosts; writes
+      only its own review file.
+    tool_rules:
+      write_file:
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/review_r')"
+          rule_description: a reviewer writes its own review file
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+      edit_file:
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: a reviewer changes nothing it reads

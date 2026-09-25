@@ -23,12 +23,14 @@ sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
 import stackenv  # noqa: E402
 import remote as remote_mod  # noqa: E402
+import refs  # noqa: E402
 
 WS_ROOT, PROXY = stackenv.load()
 RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
 WS = os.path.join(WS_ROOT, RUN)
 D = os.path.join(WS, "devflow")
 HANDOFF = os.environ.get("DEVFLOW_HANDOFF", "/work/handoff")
+CACHE = os.path.join(WS_ROOT, ".devflow-cache")
 SAFE = re.compile(r"[A-Za-z0-9._-]{1,80}")
 
 
@@ -84,7 +86,7 @@ def implementers_of(task, pr, changed, hist=None):
     sessions = list(impl.get("sessions") or [])
     if ours:
         ids.add(dfcore.IMPLEMENTER)
-        principals.append(dfcore.IMPLEMENTER)
+        principals += [dfcore.IMPLEMENTER, dfcore.RESEARCHER]
         sessions += list(hist.get("impl_sessions") or [])
     return {"identities": sorted(i for i in ids if i), "principals": sorted(set(principals)),
             "sessions": sorted(set(sessions)), "devflow_only": ours_only}
@@ -135,6 +137,7 @@ def main(argv):
         json.dump(ev, open(os.path.join(D, "evaluation.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         need = [a for a in ev.get("assignments") or [] if a.get("by") == "model"]
         emit(status="TOOL_FAILURE" if ev["tool"] else "OK", evaluation=os.path.join(D, "evaluation.json"),
+             lane=ev.get("lane") or "change",
              need_models="yes" if need and not ev["tool"] else "no", assignments=len(need),
              merged="yes" if (ev.get("pr") or {}).get("merged") else "no",
              frame=(ev.get("frame") or {}).get("id", ""), head=str((ev.get("frame") or {}).get("head_sha") or ""),
@@ -185,6 +188,8 @@ def main(argv):
               canonical_head=canonical_head, branch=dfcore.task_branch(task))
     impl = implementers_of(task, pr, changed, ev["history"])
     ev["implementers"] = impl
+    # a task type the project routes to a lane of its own is reviewed by the research reviewer
+    ev["lane"] = "research" if task.get("type") in ((pol.get("implement") or {}).get("modes") or {}) else "change"
 
     # Holds a person placed on the task (the project's own control labels) come before anything.
     for lab in issue.get("labels") or []:
@@ -442,7 +447,7 @@ def main(argv):
             write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev)
         except (remote_mod.RemoteError, dfcore.HookError) as e:
             ev["tool"].append(f"{type(e).__name__}: {e}")
-        present = {k for k, v in (ev.get("materials") or {}).items() if v and k != "not_shown"}
+        present = {k for k, v in (ev.get("materials") or {}).items() if v and k not in ("not_shown", "criteria_notes")}
         for l in chosen.values():
             l["read"] = list(l.get("read") or []) + [k for k in l.get("read_if_present") or []
                                                      if k in present and k not in (l.get("read") or [])]
@@ -462,7 +467,8 @@ def write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev):
     os.makedirs(m, exist_ok=True)
     limit = int((pol.get("reviews") or {}).get("max_file_bytes") or 60000)
     index = {"diff": [], "task": "task.json", "trace": None, "criteria": [], "contracts": [],
-             "implementation": [], "cited": [], "artifact_ops": None, "checks": "checks.json", "not_shown": []}
+             "implementation": [], "cited": [], "reference": [], "artifact_ops": None, "checks": "checks.json",
+             "not_shown": []}
     json.dump(task, open(os.path.join(m, "task.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     # what ran on exactly this head, as the remote reports it — so a reviewer judges the tests'
     # adequacy knowing their results, instead of declaring every execution unverifiable
@@ -509,6 +515,16 @@ def write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev):
             open(p, "w", encoding="utf-8").write(f"# {ref} @ {at}\n" +
                                                  ("(absent)" if text is None else text))
             index[kind].append(name)
+    # a research-lane record is reviewed with what its author was given: the reference material and
+    # the criterion's own words, read from the official files at the canonical head
+    if ev.get("lane") == "research":
+        impl_pol = pol.get("implement") or {}
+        got = refs.references(rem, impl_pol, os.path.join(m, "reference"), CACHE, RUN)
+        index["reference"] = [f"reference/{r['as']}/" for r in got if r.get("files")]
+        tree = refs.cached_tree(rem, frame["canonical_head"], CACHE, RUN)
+        files, notes = refs.criteria_text(pol, hook_root, task, tree, os.path.join(m, "criteria_text"))
+        index["criteria"] += [os.path.relpath(f, m).replace(os.sep, "/") for f in files]
+        index["criteria_notes"] = notes
     # what a changed document cites: a record that says "collector/lib/core.sh:589 derives …" is
     # reviewed against that file as the head has it, or the claim can only be taken on trust
     # (measured: a research record's review left its base lens unverified for exactly this)
@@ -560,6 +576,8 @@ def write_prompt(a, chosen, frame, ev):
                .replace("{HEAD}", str(frame["head_sha"])).replace("{FRAME}", frame["id"])
                .replace("{POLICY}", frame["policy"]["digest"])
                .replace("{BASIS}", frame["basis"])
+               .replace("{WEB}", refs.web_hosts(dfcore.RESEARCH_REVIEWER, PKG) if ev.get("lane") == "research"
+                        else "none — this review has no web tools")
                .replace("{MATERIALS}", os.path.join(D, "materials"))
                .replace("{OUT}", os.path.join(WS, f"review_{a['reviewer']}.json")))
     p = os.path.join(D, f"prompt_{a['reviewer']}.md")

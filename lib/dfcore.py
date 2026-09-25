@@ -46,6 +46,10 @@ IMPLEMENTER_AUTHORS = {IMPLEMENTER, IMPLEMENTER_EMAIL}
 # The research lane's role (task types a project routes to `implement.modes`). Its commits carry the
 # same author as the implementer's: both are devflow's own, recorded as pushed.
 RESEARCHER = "devflow-researcher"
+# Who reviews a research-lane record: given what its author was given — the same reference material,
+# the criterion's own words, the same web hosts — so it can check the facts, not only their form. An
+# identity of its own, so the review stays independent of the researcher.
+RESEARCH_REVIEWER = "devflow-research-reviewer"
 PR_MARK = "<!-- devflow:pr"
 
 

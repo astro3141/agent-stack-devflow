@@ -951,12 +951,15 @@ def impl_db(by="agent", max_rounds=3, task_type=None):
         else:
             p["implement"] = {"by": by, "max_rounds": max_rounds, "regenerate": [["python3", "tools/gen.py"]],
                               "generated": ["dist/collection-plan.tsv"],
+                              "references": [{"as": "legacy", "ref": "reference/legacy", "path": "corpus/"}],
                               "modes": {"research": {"writes": ["docs/research/"], "path": "docs/research/{task}.md"},
                                         "survey": {"writes": ["docs/research/"], "path": "docs/research/{task}.md"}}}
     edit_policy(db, pol, head_too=False)
     r = R(db)
     r["commits"][r["branches"][build.CANONICAL]]["files"]["tools/gen.py"] = GEN_PY
     r["pulls"], r["reviews"] = {}, {}
+    r["commits"]["ref0"] = {"parents": [], "author": "someone", "files": {"corpus/a.sh": "ps -ef | grep vsftpd\n"}}
+    r["branches"]["reference/legacy"] = "ref0"
     set_task(db, pr=None, implementer=None)     # devflow implements; nobody else is named
     if task_type:
         set_task(db, type=task_type, change_class="ORDINARY", impacts=[], items=["U-54"])
@@ -1050,7 +1053,7 @@ def controls_implement():
               sorted({a["by"] for a in ev2.get("assignments") or []})), ("no", ["deferred"]))
         check("the implementer is devflow-implementer, not the account the push went through",
               (ev2["implementers"]["identities"], ev2["implementers"]["principals"]),
-              (["devflow-implementer"], ["devflow-implementer"]))
+              (["devflow-implementer"], ["devflow-implementer", "devflow-researcher"]))
 
         def green_and_reviewed(db):
             set_runs(db, head, build.check_runs())
@@ -1219,6 +1222,11 @@ def controls_implement():
         check("its review carries the research-record lens", "research-record" in (ev2.get("reviews") or {}).get("required", []), True)
         check("a repository file the record cites is in the reviewer's materials (and a path that is not there is not)",
               [os.path.basename(c) for c in (ev2.get("materials") or {}).get("cited", [])], ["tools__gen.py.txt"])
+        check("a research record's review is the research lane's: its own reviewer, with its author's inputs",
+              (r2["evaluate"].get("lane"), (ev2.get("materials") or {}).get("reference")), ("research", ["reference/legacy/"]))
+        prompt = open(next(a["prompt"] for a in ev2["assignments"] if a.get("prompt")), encoding="utf-8").read()
+        check("and it is told the hosts it may fetch from — the researcher's",
+              ("packages.ubuntu.com" in prompt and "{WEB}" not in prompt), True)
         check("and the lenses that may read it must read it — it is there",
               ("cited" in ev2["lens_defs"]["base"]["read"], "cited" in ev2["lens_defs"]["research-record"]["read"]), (True, True))
     finally:

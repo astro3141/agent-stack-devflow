@@ -84,6 +84,7 @@ agents:
       merged: {type: string}
       frame: {type: string}
       head: {type: string}
+      lane: {type: string}
       error: {type: string}
     routes:
       - to: route
@@ -94,7 +95,10 @@ agents:
     type: script
     description: Quota admission for the model reviews (a HOLD means no model review this run, not a verdict)
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/stack/steps/route.py", "{{ workflow.input.profile }}"]
+    # a research-lane record is reviewed as devflow-research-reviewer, a role of its own, which only
+    # the implementer's profile (claude) can run
+    args: ["/work/stack/steps/route.py",
+           "{% if evaluate.output.lane == 'research' %}{{ workflow.input.impl_profile }}{% else %}{{ workflow.input.profile }}{% endif %}"]
     output:
       decision: {type: string}
       provider: {type: string}
@@ -114,7 +118,8 @@ agents:
     description: One fan-out member per model review assignment, under the reviewer principal
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/review_plan.py", "{{ route.output.provider }}",
-           "{{ route.output.login }}", "{{ route.output.model_route }}", "{{ workflow.input.reviewer }}"]
+           "{{ route.output.login }}", "{{ route.output.model_route }}",
+           "{% if evaluate.output.lane == 'research' %}devflow-research-reviewer{% else %}{{ workflow.input.reviewer }}{% endif %}"]
     output:
       status: {type: string}
       plan: {type: string}

@@ -48,7 +48,7 @@ lenses:
     title: A research record others will build on
     when: {task_types: [research, survey]}
     read: [diff, task, criteria]
-    read_if_present: [cited]
+    read_if_present: [cited, reference]
     questions:
       - {id: sourced, q: "Does every claim name its source (URL and the date read, or file and line), say whether that source is primary, and say what it applies to (distribution, version, product)?"}
       - {id: scope, q: "Is what could not be established marked as such — not verified, and why — rather than written as fact or left out?"}

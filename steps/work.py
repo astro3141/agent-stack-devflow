@@ -28,6 +28,7 @@ import dfcore  # noqa: E402
 import stackenv  # noqa: E402
 import remote as remote_mod  # noqa: E402
 from wstree import tree_map  # noqa: E402
+import refs  # noqa: E402
 
 WS_ROOT, PROXY = stackenv.load()
 RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
@@ -45,87 +46,21 @@ def emit(**kw):
 
 
 def cached_tree(rem, sha, only=None):
-    """The tree of `sha` (or its `only` part), fetched once per commit and kept: a commit's tree
-    never changes, and the corpus a project references is large."""
-    key = sha + ("-" + hashlib.sha1(only.encode()).hexdigest()[:8] if only else "")
-    dest = os.path.join(CACHE, rem.repo.replace("/", "__"), key)
-    if os.path.isfile(os.path.join(dest, ".complete")):
-        return dest
-    tmp = dest + f".tmp-{RUN}"
-    shutil.rmtree(tmp, ignore_errors=True)
-    os.makedirs(tmp)
-    rem.materialize(sha, tmp, only=only)
-    open(os.path.join(tmp, ".complete"), "w").close()
-    shutil.rmtree(dest, ignore_errors=True)
-    os.replace(tmp, dest)
-    return dest
+    return refs.cached_tree(rem, sha, CACHE, RUN, only=only)
 
 
-def copy_tree(src, dest):
-    shutil.rmtree(dest, ignore_errors=True)
-    shutil.copytree(src, dest, ignore=shutil.ignore_patterns(".complete"))
-
-
-def as_text(data, limit):
-    """Reference text as UTF-8, or None for what a model cannot read (binary, too large)."""
-    if len(data) > limit or b"\x00" in data[:8192]:
-        return None
-    for enc in ("utf-8", "cp949", "euc-kr"):
-        try:
-            return data.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace")
+copy_tree = refs.copy_tree
 
 
 def references(rem, impl):
-    """The project's reference material, as the implementer may read it. Returns [{as, ref, sha,
-    files, note}]."""
-    out = []
-    shutil.rmtree(REF, ignore_errors=True)
-    for r in impl.get("references") or []:
-        name = "".join(c for c in str(r.get("as") or "ref") if c.isalnum() or c in "-_") or "ref"
-        sha = rem.branch_head_or_none(r["ref"]) if r.get("ref") else None
-        if not sha:
-            out.append({"as": name, "ref": r.get("ref"), "sha": None, "files": 0,
-                        "note": "the reference branch is not on the remote"})
-            continue
-        src = cached_tree(rem, sha, only=r.get("path"))
-        limit, n = int(r.get("max_file_bytes") or 2_000_000), 0
-        for d, _, files in os.walk(src):
-            for f in files:
-                if f == ".complete":
-                    continue
-                p = os.path.join(d, f)
-                text = as_text(open(p, "rb").read(), limit)
-                if text is None:
-                    continue
-                rel = os.path.relpath(p, os.path.join(src, r.get("path") or "")).replace(os.sep, "/")
-                out_p = os.path.join(REF, name, rel)
-                os.makedirs(os.path.dirname(out_p), exist_ok=True)
-                open(out_p, "w", encoding="utf-8").write(text)
-                n += 1
-        out.append({"as": name, "ref": r["ref"], "sha": sha, "files": n, "path": os.path.join(REF, name),
-                    "note": r.get("note") or ""})
-    return out
+    """The project's reference material, as the model may read it (lib/refs.py)."""
+    return refs.references(rem, impl, REF, CACHE, RUN)
 
 
 def criteria(pol, task):
-    """The official criterion's own words for this task, as the project's hook reads them from the
-    official files in the checkout (hook op `criteria_text`, optional). Written under /ws/<run>/
-    criteria/. A project whose hook has no such op gives none, and says nothing is wrong."""
-    shutil.rmtree(CRIT, ignore_errors=True)
-    try:
-        got = dfcore.run_hook(pol, os.path.join(D, "policy"), "criteria_text", {"task": task, "repo_dir": REPO})
-    except dfcore.HookError as e:
-        return [], [f"the project's hook gave no criteria text: {e}"]
-    written = []
-    for name, text in (got.get("files") or {}).items():
-        safe = "".join(c for c in name if c.isalnum() or c in "._-")[:120] or "criterion.md"
-        os.makedirs(CRIT, exist_ok=True)
-        open(os.path.join(CRIT, safe), "w", encoding="utf-8").write(text)
-        written.append(os.path.join(CRIT, safe))
-    return written, list(got.get("notes") or [])
+    """The official criterion's own words for this task, from the official files in the checkout
+    (lib/refs.py, the project's hook op `criteria_text`)."""
+    return refs.criteria_text(pol, os.path.join(D, "policy"), task, REPO, CRIT)
 
 
 def feedback(rem, st, ev):
@@ -165,18 +100,7 @@ def records(rdir):
 
 
 def web_hosts(role):
-    """The hosts a role may fetch from (its `egress:` in this package's principals.yaml,
-    agent-stack §48) — told to the model, so it does not spend its time on pages the network
-    refuses (measured: a preparation tried package mirrors no list had open)."""
-    try:
-        import yaml
-        doc = yaml.safe_load(open(os.path.join(PKG, "principals.yaml"), encoding="utf-8")) or {}
-        hosts = ((doc.get("principals") or {}).get(role) or {}).get("egress")
-    except Exception:
-        hosts = None
-    if hosts is None:
-        return "whatever the stack's shared allowlist holds open"
-    return ", ".join(hosts) if hosts else "none (the providers only)"
+    return refs.web_hosts(role, PKG)
 
 
 def fill(tpl, values):

@@ -30,7 +30,7 @@ requires:
   # "no model review in this run" (the reviews stay missing and the state says so) — not a refusal
   # of a run that may need no model at all.
   capabilities: [tool_rights, egress]
-  principals: [devflow-reviewer, devflow-implementer, devflow-researcher]
+  principals: [devflow-reviewer, devflow-implementer, devflow-researcher, devflow-research-reviewer]
   # What this package needs in the environment, declared so the operator is told before a run
   # instead of by a step's error several minutes in. Names and purposes only: the value is the
   # operator's, it arrives from a git-ignored file on the host, and nothing here ever reads it
