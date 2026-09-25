@@ -16,6 +16,13 @@ workflows:
   devflow: devflow.yaml            # one pass over a task: judge it, and act on it when devflow may
   devflow-auto: devflow-auto.yaml  # passes, one after another, until a person or CI has the next move
 requires:
+  # The hosts this package reaches, declared so the allowlist can be read back (agent-stack
+  # OPERATIONS §45). Declaring does not open them: the allowlist is the operator's file and it is
+  # shared, so anything opened here is reachable by every other package too.
+  egress:
+    - github.com
+    - api.github.com
+    - codeload.github.com
   # egress: the remote (GitHub) and the model providers. tool_rights: a model review writes its
   # file through Preloop under the reviewer principal. Admission is deliberately not required at
   # start: whether a run needs a model is known only after evaluate, and a router HOLD then means
