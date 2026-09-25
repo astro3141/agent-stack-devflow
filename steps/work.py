@@ -35,6 +35,7 @@ WS = os.path.join(WS_ROOT, RUN)
 D = os.path.join(WS, "devflow")
 REPO = os.path.join(WS, "repo")
 REF = os.path.join(WS, "reference")
+CRIT = os.path.join(WS, "criteria")
 CACHE = os.path.join(WS_ROOT, ".devflow-cache")
 
 
@@ -107,6 +108,24 @@ def references(rem, impl):
         out.append({"as": name, "ref": r["ref"], "sha": sha, "files": n, "path": os.path.join(REF, name),
                     "note": r.get("note") or ""})
     return out
+
+
+def criteria(pol, task):
+    """The official criterion's own words for this task, as the project's hook reads them from the
+    official files in the checkout (hook op `criteria_text`, optional). Written under /ws/<run>/
+    criteria/. A project whose hook has no such op gives none, and says nothing is wrong."""
+    shutil.rmtree(CRIT, ignore_errors=True)
+    try:
+        got = dfcore.run_hook(pol, os.path.join(D, "policy"), "criteria_text", {"task": task, "repo_dir": REPO})
+    except dfcore.HookError as e:
+        return [], [f"the project's hook gave no criteria text: {e}"]
+    written = []
+    for name, text in (got.get("files") or {}).items():
+        safe = "".join(c for c in name if c.isalnum() or c in "._-")[:120] or "criterion.md"
+        os.makedirs(CRIT, exist_ok=True)
+        open(os.path.join(CRIT, safe), "w", encoding="utf-8").write(text)
+        written.append(os.path.join(CRIT, safe))
+    return written, list(got.get("notes") or [])
 
 
 def feedback(rem, st, ev):
@@ -207,6 +226,8 @@ def main(argv):
     json.dump(tree_map(REPO), open(os.path.join(D, "snapshot.json"), "w"), indent=0)
     refs = references(rem, impl)
     work["references"] = refs
+    crit_files, crit_notes = criteria(pol, task)
+    work["criteria"] = {"files": crit_files, "notes": crit_notes}
     trace_path = (pol.get("trace") or {}).get("path", ".devflow/tasks/{task}.yaml").format(task=task["id"])
     research_path = str(impl.get("research_path") or ".devflow/tasks/{task}.research.md").format(task=task["id"])
     instr = {}
@@ -222,7 +243,8 @@ def main(argv):
               "RULE_PATHS": [reg["policy_path"]] + list(pol.get("rule_paths") or []),
               "GENERATED": list(impl.get("generated") or []),
               "REGENERATE": [" ".join(c) for c in impl.get("regenerate") or []],
-              "FEEDBACK": fb or {}, "CLASSIFICATION": ev.get("classification") or {}}
+              "FEEDBACK": fb or {}, "CLASSIFICATION": ev.get("classification") or {},
+              "CRITERIA": "\n".join([f"- {p}" for p in crit_files] + [f"- note: {n}" for n in crit_notes]) or "(none)"}
     prompts = {}
     for kind in (["prepare", "implement"] if do == "prepare" else ["implement"]):
         tpl = open(os.path.join(PKG, "prompts", f"{kind}.md"), encoding="utf-8").read()

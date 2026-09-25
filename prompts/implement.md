@@ -22,6 +22,9 @@ Classification the project's rules gave it:
 - The task's trace and research record, if preparation wrote them: `{REPO}/{TRACE_PATH}`,
   `{REPO}/{RESEARCH_PATH}`. Implement what they say; where you find them wrong, correct them in
   the same change and say so.
+- The official criterion's own words for this task, read from the official files by the project's
+  hook (they are the criterion, not an extract of it):
+{CRITERIA}
 - Reference material (read-only, never to be run or copied as code):
 {REFERENCES}
 

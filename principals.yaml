@@ -1,4 +1,4 @@
-# The identity devflow's model reviews run as, in the shape of config/principals.yaml.
+# The identities devflow's model steps run as, in the shape of config/principals.yaml.
 # `principals.py apply` (scripts/up.sh) creates it and mints its credential.
 #
 # A reviewer reads the frozen materials and writes its own review file — nothing else. It may not
@@ -34,11 +34,21 @@ principals:
       project it may change is decided again, by the project's canonical rules, before anything is
       pushed (steps/deliver.py); this right only keeps it inside its own workspace.
     tool_rules:
+      # one condition per rule: a `simple` condition is a single test (measured — an `a || b` rule
+      # matched nothing, and every write fell through to the deny)
       write_file:
         - action: allow
           condition_type: simple
-          condition_expression: "args.path.contains('/repo/') || args.path.endsWith('/devflow/prepare.json') || args.path.endsWith('/devflow/implement.json')"
-          rule_description: the implementer writes the checkout and its own report
+          condition_expression: "args.path.contains('/repo/')"
+          rule_description: the implementer writes the checkout
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.endsWith('/devflow/prepare.json')"
+          rule_description: and preparation's report
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.endsWith('/devflow/implement.json')"
+          rule_description: and the implementation's report
         - action: deny
           condition_type: simple
           condition_expression: ""

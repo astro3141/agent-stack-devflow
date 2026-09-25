@@ -595,8 +595,13 @@ class FixtureRemote:
                 continue
             out = os.path.join(dest, rel)
             os.makedirs(os.path.dirname(out), exist_ok=True)
-            with open(out, "w", encoding="utf-8", newline="") as f:
-                f.write(text)
+            if text.startswith("base64:"):          # a binary file the fixture carries whole
+                import base64
+                with open(out, "wb") as f:
+                    f.write(base64.b64decode(text[7:]))
+            else:
+                with open(out, "w", encoding="utf-8", newline="") as f:
+                    f.write(text)
             written.append(rel)
         return written
 

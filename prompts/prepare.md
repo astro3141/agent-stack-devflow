@@ -20,6 +20,9 @@ Classification the project's rules gave it so far:
 
 - The repository, at the canonical head `{CANONICAL}` of `{CANONICAL_BRANCH}`: `{REPO}`
   Read anything in it. Paths below are relative to it.
+- The official criterion's own words for this task, read from the official files by the project's
+  hook (quote from these; they are the criterion, not an extract of it):
+{CRITERIA}
 - Reference material the project names (read-only, never to be run or copied as code):
 {REFERENCES}
 - You may also search the web and fetch pages, for facts about operating systems and products
