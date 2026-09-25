@@ -965,7 +965,8 @@ def impl_db(by="agent", max_rounds=3, task_type=None):
 
 def research_model(stage, ws, extra=None, report_it=True):
     """What the research lane writes: one record, and its report."""
-    write(ws, "docs/research/t-0054.md", "# FTP daemons on the target distributions\n\n- vsftpd ... (source: packages.ubuntu.com, 2026-09-25, primary)\n")
+    write(ws, "docs/research/t-0054.md", "# FTP daemons on the target distributions\n\n- vsftpd ... (source: packages.ubuntu.com, 2026-09-25, primary)\n"
+                                         "- the generator copies the source Plan (tools/gen.py:5); nothing reads docs/nowhere.py\n")
     for path, text in (extra or {}).items():
         write(ws, path, text)
     if report_it:
@@ -1216,6 +1217,10 @@ def controls_implement():
         r2 = s.run_pass(research_model, review_mode="model")
         ev2 = json.load(open(os.path.join(r2["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
         check("its review carries the research-record lens", "research-record" in (ev2.get("reviews") or {}).get("required", []), True)
+        check("a repository file the record cites is in the reviewer's materials (and a path that is not there is not)",
+              [os.path.basename(c) for c in (ev2.get("materials") or {}).get("cited", [])], ["tools__gen.py.txt"])
+        check("and the lenses that may read it must read it — it is there",
+              ("cited" in ev2["lens_defs"]["base"]["read"], "cited" in ev2["lens_defs"]["research-record"]["read"]), (True, True))
     finally:
         s.close()
 

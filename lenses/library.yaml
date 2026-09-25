@@ -30,6 +30,7 @@ schema: devflow/lenses@1
 base:
   title: Base review
   read: [diff, task, checks]
+  read_if_present: [cited]           # repository files a changed document cites, as the head has them
   questions:
     - {id: function, q: "Does the change do what the task's completion criteria say — each criterion with evidence, not with a command's exit code?"}
     - {id: boundaries, q: "Are inputs, limits and edge cases at the boundaries handled?"}
@@ -47,6 +48,7 @@ lenses:
     title: A research record others will build on
     when: {task_types: [research, survey]}
     read: [diff, task, criteria]
+    read_if_present: [cited]
     questions:
       - {id: sourced, q: "Does every claim name its source (URL and the date read, or file and line), say whether that source is primary, and say what it applies to (distribution, version, product)?"}
       - {id: scope, q: "Is what could not be established marked as such — not verified, and why — rather than written as fact or left out?"}

@@ -442,6 +442,10 @@ def main(argv):
             write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev)
         except (remote_mod.RemoteError, dfcore.HookError) as e:
             ev["tool"].append(f"{type(e).__name__}: {e}")
+        present = {k for k, v in (ev.get("materials") or {}).items() if v and k != "not_shown"}
+        for l in chosen.values():
+            l["read"] = list(l.get("read") or []) + [k for k in l.get("read_if_present") or []
+                                                     if k in present and k not in (l.get("read") or [])]
         for a in assignments:
             if a["by"] == "model":
                 a["prompt"] = write_prompt(a, chosen, frame, ev)
@@ -458,7 +462,7 @@ def write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev):
     os.makedirs(m, exist_ok=True)
     limit = int((pol.get("reviews") or {}).get("max_file_bytes") or 60000)
     index = {"diff": [], "task": "task.json", "trace": None, "criteria": [], "contracts": [],
-             "implementation": [], "artifact_ops": None, "checks": "checks.json", "not_shown": []}
+             "implementation": [], "cited": [], "artifact_ops": None, "checks": "checks.json", "not_shown": []}
     json.dump(task, open(os.path.join(m, "task.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     # what ran on exactly this head, as the remote reports it — so a reviewer judges the tests'
     # adequacy knowing their results, instead of declaring every execution unverifiable
@@ -505,8 +509,43 @@ def write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev):
             open(p, "w", encoding="utf-8").write(f"# {ref} @ {at}\n" +
                                                  ("(absent)" if text is None else text))
             index[kind].append(name)
+    # what a changed document cites: a record that says "collector/lib/core.sh:589 derives …" is
+    # reviewed against that file as the head has it, or the claim can only be taken on trust
+    # (measured: a research record's review left its base lens unverified for exactly this)
+    for ref in cited_paths(rem, pr, changed["files"], limit=int((pol.get("reviews") or {}).get("max_cited") or 20)):
+        text = rem.file_at(pr["head_sha"], ref)
+        if text is None:
+            continue
+        name = f"cited/{ref.replace('/', '__')}.txt"
+        p = os.path.join(m, name)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        if len(text) > limit:
+            index["not_shown"].append({"ref": f"cited:{ref}", "bytes": len(text), "limit": limit})
+            text = f"(not shown: {len(text)} bytes exceeds the {limit}-byte material limit)"
+        open(p, "w", encoding="utf-8").write(f"# {ref} @ {pr['head_sha']}\n" + text)
+        index["cited"].append(name)
     json.dump(index, open(os.path.join(m, "index.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     ev["materials"] = index
+
+
+CITE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.(?:py|sh|yaml|yml|tsv|json|md|txt))(?::\d+)?")
+
+
+def cited_paths(rem, pr, changed, limit=20):
+    """Repository paths the changed documents mention (`dir/file.ext`, optionally `:line`), that
+    exist at the head and are not themselves part of the change — at most `limit`, in order of first
+    mention."""
+    out = []
+    for f in changed:
+        if not f.endswith((".md", ".txt", ".rst")):
+            continue
+        text = rem.file_at(pr["head_sha"], f) or ""
+        for m in CITE.finditer(text):
+            ref = m.group(1).lstrip("./")
+            if ref in changed or ref in out or ref.startswith(("http", "www.")):
+                continue
+            out.append(ref)
+    return [r for r in out if rem.file_at(pr["head_sha"], r) is not None][:limit]
 
 
 def write_prompt(a, chosen, frame, ev):

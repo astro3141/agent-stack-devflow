@@ -35,6 +35,12 @@ Answer every question of every lens, by its id. Read the material kinds your len
     Stating limits is honest and does not leave the lens incomplete.
   A result in `checks.json` is evidence that the check ran on this head and how it ended; relying on
   it is a limit, not an unverified question.
+- A fact the change records from a source **outside the repository** (a web page, a vendor's
+  document) is not yours to re-derive: it is verified by what the change names as its verification
+  (a test, a container-smoke case), or it is marked as not verified. Whether each such fact is
+  sourced, dated, marked and consistent is your question; relying on the source for its truth is a
+  limit, not an unverified question. A repository file the change cites is in the materials
+  (`cited`) when it exists — check those.
 - Where an execution result (a test outcome, an observed value) disagrees with a document, say so
   and explain it; do not discard the observation because a document ranks higher.
 - `verdict`: `PASS` (no blocking finding), `REQUEST_CHANGES` (a blocking finding against a
@@ -67,5 +73,5 @@ Write exactly one file, `{OUT}`, in the run's workspace (use the file tool), con
 }
 ```
 
-`materials` lists each material kind you read (`diff`, `task`, `trace`, `criteria`, `contracts`,
+`materials` lists each material kind you read (`diff`, `task`, `trace`, `criteria`, `contracts`, `cited`,
 `artifact_ops`) with `read: true` only if you actually read it.
