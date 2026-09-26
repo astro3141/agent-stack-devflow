@@ -86,7 +86,7 @@ def token(proxy_env=None, now=None, post=None):
     raise AuthError("no GitHub credential",
                     hint="press 연결 under the devflow workflow on the panel (GitHub login), or put "
                          "DEVFLOW_GITHUB_TOKEN=<token> in docker/package.env; either way "
-                         "^api\\.github\\.com$ and ^github\\.com$ must be in docker/egress/allow")
+                         "^api\\.github\\.com$ and ^github\\.com$ must be in docker/egress/allow.local")
 
 
 def _login_token(path, proxy_env, now, post):

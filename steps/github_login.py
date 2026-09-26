@@ -59,7 +59,7 @@ def main(argv):
         dc = ghauth._post_form(DEVICE_URL, {"client_id": client_id, "scope": "repo"})
     except (urllib.error.URLError, OSError) as e:
         print(f"GitHub could not be reached: {type(e).__name__}: {e} "
-              "(docker/egress/allow needs ^github\\.com$ and ^api\\.github\\.com$)")
+              "(docker/egress/allow.local needs ^github\\.com$ and ^api\\.github\\.com$)")
         return 1
     if "device_code" not in dc:
         print(f"GitHub refused to start the login: {dc.get('error', '')} {dc.get('error_description', '')}")

@@ -129,8 +129,10 @@ Once, before that: register an app with device flow enabled and put its Client I
   repository the account can.
 
 `DEVFLOW_GITHUB_TOKEN` in `docker/package.env` (a fine-grained token, which may be set never to
-expire) still works instead. `docker/egress/allow` needs `^github\.com$`, `^api\.github\.com$` and
-`^codeload\.github\.com$` (the tree archives).
+expire) still works instead. `docker/egress/allow.local` — the instance's own list, git-ignored,
+which `scripts/up.sh` merges into the shared proxy's — needs `^github\.com$`, `^api\.github\.com$`
+and `^codeload\.github\.com$` (the tree archives). Only devflow's scripts call GitHub, through the
+shared proxy; the egress profiles its model roles run in do not reach GitHub.
 
 ## Using it
 
@@ -140,7 +142,7 @@ expire) still works instead. `docker/egress/allow` needs `^github\.com$`, `^api\
 
 ```
 docker/package.env        DEVFLOW_GITHUB_TOKEN=<fine-grained token: contents read; issues, pull requests, commit statuses read/write>
-docker/egress/allow       ^api\.github\.com$
+docker/egress/allow.local ^github\.com$ ^api\.github\.com$ ^codeload\.github\.com$   (git-ignored; up.sh merges it)
 scripts/up.sh             applies principals.yaml (devflow-reviewer) and restarts the agent
 ```
 

@@ -12,7 +12,7 @@ Two implementations with one surface:
 
   GitHubRemote   the REST API, with the token lib/ghauth.py finds (the panel's GitHub login, else
                  DEVFLOW_GITHUB_TOKEN in docker/package.env), through the egress proxy — which
-                 reaches api.github.com only if the operator added it to docker/egress/allow.
+                 reaches api.github.com only if the operator added it to docker/egress/allow.local.
                  Without a credential it refuses with a hint that names both ways.
   FixtureRemote  one JSON file. Used by the controls and by fixture runs through the real runner,
                  and able to inject the faults a real remote has: a request that took effect but
@@ -300,7 +300,7 @@ class GitHubRemote:
                 raise RemoteError(f"tarball {sha[:12]}: HTTP {e.code}")
             except (urllib.error.URLError, TimeoutError, OSError) as e:
                 raise RemoteError(f"tarball {sha[:12]}: {type(e).__name__}: {e} "
-                                  "(the archive is served from codeload.github.com: docker/egress/allow)")
+                                  "(the archive is served from codeload.github.com: docker/egress/allow.local)")
             tmp.seek(0)
             with tarfile.open(fileobj=tmp, mode="r:*") as tf:
                 for m in tf.getmembers():

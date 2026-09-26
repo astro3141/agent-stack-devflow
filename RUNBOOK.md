@@ -13,7 +13,7 @@ of those sentences and what each one asks.
 | create the roles | `scripts/up.sh` (applies `principals.yaml`) | `principals.py list` shows `devflow-implementer`, `devflow-researcher`, `devflow-reviewer`, `devflow-research-reviewer` |
 | provision the egress profiles the roles name | the stack's `docker/egress/profiles/<name>.allow` + compose — `closed`, `research`, `research-review` | the broker's `/health` lists them; a role mapped to a missing profile is refused by name |
 | GitHub | register a GitHub App (device flow on, token expiry off), put its Client ID in `docker/package.env` as `DEVFLOW_GITHUB_CLIENT_ID`, restart; then panel → 워크플로 실행 → devflow → **연결** | the panel shows 연결됨 |
-| shared egress for devflow's scripts | `docker/egress/allow`: `github.com`, `api.github.com`, `codeload.github.com` | `up.sh --check` |
+| shared egress for devflow's scripts | `docker/egress/allow.local` (the instance's own, git-ignored; `up.sh` merges it into `config/generated/egress/allow`): `^github\.com$`, `^api\.github\.com$`, `^codeload\.github\.com$`. Only devflow's scripts call GitHub, through the shared proxy; its model roles' profiles (`closed`, `research`, `research-review`) do not reach GitHub, and need not | `up.sh --check`; `grep github config/generated/egress/allow` |
 | the implementer's profile | `config/profiles/long-task.yaml` — claude only, 60-minute calls, `native_allow: [WebSearch, WebFetch]` | `run_workflow.py` refuses an unknown profile |
 
 ## 2. Once per project
