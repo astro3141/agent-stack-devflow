@@ -981,14 +981,18 @@ GEN_PY = ("import os, sys\n"
           "open('dist/collection-plan.tsv', 'w').write(open('collection-plan.tsv').read())\n")
 
 
-def impl_db(by="agent", max_rounds=3, task_type=None):
+def impl_db(by="agent", max_rounds=3, task_type=None, reviewer_models=None):
     """A task with no pull request yet, in a project that lets devflow implement — and that routes
     research and survey tasks to the research lane."""
     db = build.scanner_pass()
 
     def pol(p):
         p["task_types"] = list(p.get("task_types") or []) + ["research", "survey"]
-        p.setdefault("reviews", {})["distinct_models"] = {"research": 2, "survey": 2}
+        if reviewer_models:
+            p.setdefault("reviews", {})["reviewer_models"] = reviewer_models
+            p["reviews"]["distinct_models"] = {}
+        else:
+            p.setdefault("reviews", {})["distinct_models"] = {"research": 2, "survey": 2}
         if not by:
             p.pop("implement", None)
         else:
@@ -1342,7 +1346,7 @@ def controls_implement():
         wf = yaml.safe_load(open(os.path.join(PKG, "devflow.yaml"), encoding="utf-8"))
         steps_by = {a["name"]: a for a in wf["agents"]}
         check("and the workflow asks whether every one is usable before starting any (the stack's admit_models.py)",
-              (steps_by["route"]["routes"][0]["to"], "evaluate.output.models" in steps_by["route"]["routes"][0]["when"],
+              (steps_by["evaluate"]["routes"][0]["to"], "evaluate.output.models" in steps_by["evaluate"]["routes"][0]["when"],
                steps_by["admit"]["args"][0], [r["to"] for r in steps_by["admit"]["routes"]]),
               ("admit", True, "/work/stack/steps/admit_models.py", ["review_plan", "adjudicate"]))
         env_h = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(r2["ws"])}
@@ -1400,6 +1404,20 @@ def controls_implement():
         r5 = s.run_pass(research_model)
         check("one that names the item condition it endangers holds the record: REQUEST_CHANGES",
               verdict(r5), "REQUEST_CHANGES")
+    finally:
+        s.close()
+
+    s = Sim(impl_db(task_type="research", reviewer_models={"research": ["codex"]}))
+    try:
+        s.run_pass(research_model)
+        s.edit(lambda db: set_runs(db, branch_of(db), build.check_runs()))
+        r = s.run_pass(research_model, review_mode="model")
+        ev = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
+        check("a project that names codex to review research records: one reviewer, codex, as the research reviewer",
+              ([(a["reviewer"], a.get("provider"), a.get("principal")) for a in ev["assignments"]], r["evaluate"].get("models")),
+              ([("r1-codex", "codex", "devflow-research-reviewer")], "codex"))
+        check("and one model completing a lens is enough (distinct_models not raised)",
+              (ev["reviews"]["distinct_models"]), 1)
     finally:
         s.close()
 

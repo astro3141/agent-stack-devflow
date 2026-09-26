@@ -438,12 +438,15 @@ def main(argv):
     assignments = dfcore.assign_reviewers(chosen, pol, cls)
     rv = pol.get("reviews") or {}
     need_models = dfcore.distinct_models_needed(pol, task.get("type"))
-    if need_models > 1:
+    # the models that review this task type, when the project names them (reviews.reviewer_models:
+    # e.g. codex for a record claude wrote); several are needed only when distinct_models says so
+    named = list(((rv.get("reviewer_models") or {}).get(task.get("type")) or []))
+    if named or need_models > 1:
         # a lens is complete only when that many different models completed it: one assignment per
         # model, each carrying the lenses (its own reviewer label, provider and principal). On the
         # research lane every model reviews as the research reviewer, in its profile with the
         # author's hosts: brokered, every vendor runs as a role (agent-stack §55).
-        models = list(rv.get("models") or ["claude", "codex"])[:need_models]
+        models = (named or list(rv.get("models") or ["claude", "codex"]))[:max(need_models, 1)]
         # the reviewer's label names the review file (review_<label>.json), and every reviewer
         # principal's write rule allows exactly the review_r prefix — a label that drops the r
         # renames the file out of its author's own rights (measured: a finished review, written
