@@ -668,7 +668,9 @@ RESEARCH_BLOCKING = """- This is a research record: it serves the task's `items`
   Everything else — a claim no served item relies on, wording, a peripheral citation, something
   that should be marked unverified but decides nothing for the items — is **advisory**: the record
   is merged with it noted, and no further round is spent on it. A blocking finding without
-  `affects` is treated as advisory.
+  `affects` is treated as advisory. The same holds for what you could not verify: if it endangers
+  what the items need, make it a blocking finding with `affects`; declared under `unverified`, it
+  is recorded as a limit of your review and does not hold the record.
 """
 
 

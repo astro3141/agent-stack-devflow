@@ -62,7 +62,8 @@ A research record goes round again only when its items would be worse off: a blo
 finding on it must name, in `affects`, the question or item condition it endangers — a fact the
 items need that is missing, or one they rely on that cannot be trusted. Anything else is advisory:
 shown on the issue, merged with the record, no further round. (A person's ` ```devflow-review `
-follows the same rule.)
+follows the same rule.) What a reviewer declares it could not verify is recorded as a limit of that
+review; it holds the record only as a blocking finding that names what it endangers.
 
 ## 5. When it waits for you
 

@@ -665,6 +665,21 @@ def adjudicate(ctx):
     rv = ctx.get("reviews") or {}
     required = list(rv.get("required") or [])
     valid = [r for r in rv.get("results") or [] if r.get("valid")]
+    if ctx.get("lane") == "research":
+        # on a research record, what a reviewer declares it could not verify holds the lens only
+        # through a blocking finding that names what it endangers; declared alone, it is a limit.
+        # Material not read and questions not answered still leave the lens incomplete.
+        eased = []
+        for i, r in enumerate(valid):
+            soft = {lid for lid, u in (r.get("unverified") or {}).items()
+                    if isinstance(u, dict) and u.get("declared") and not u.get("not_read") and not u.get("unanswered")}
+            if soft:
+                eased += [f"{lid}: {d}" for lid in sorted(soft) for d in r["unverified"][lid]["declared"]]
+                valid[i] = dict(r, complete=sorted(set(r["complete"]) | soft),
+                                unverified={l: u for l, u in r["unverified"].items() if l not in soft})
+        if eased:
+            notes.append(f"{len(eased)} declared unverified scope(s) on the record stay noted as limits: "
+                         + "; ".join(e[:160] for e in eased[:3]))
     covered, unverified = set(), {}
     need_models = int(rv.get("distinct_models") or 1)
     by_lens = {}

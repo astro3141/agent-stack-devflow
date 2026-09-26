@@ -1407,6 +1407,26 @@ def controls_implement():
     finally:
         s.close()
 
+    import dfcore
+
+    def research_ctx(lane, codex_unverified):
+        rv = lambda prov, complete, unv: {"valid": True, "complete": complete, "unverified": unv, "findings": [],
+                                          "verdict": "PASS", "independent": True,
+                                          "reviewer": {"kind": "model", "provider": prov, "identity": f"devflow-model:{prov}"}}
+        return {"lane": lane, "pr": {"head_sha": "h" * 40, "base_sha": "b" * 40, "state": "open"},
+                "checks": {"results": {}}, "history": {},
+                "reviews": {"required": ["base", "research-record"], "distinct_models": 2,
+                            "results": [rv("claude", ["base", "research-record"], {}),
+                                        rv("codex", ["base"], {"research-record": codex_unverified})]}}
+    declared = {"not_read": [], "unanswered": [], "declared": ["a fixture the record names is not in cited"]}
+    st = dfcore.adjudicate(research_ctx("research", declared))
+    check("research lane: two PASS reviews, one declaring scope it could not verify — a limit, not a hold",
+          (st["verdict"], st["phase"], any("stay noted as limits" in n for n in st["notes"])), ("PASS", "integrate", True))
+    st = dfcore.adjudicate(research_ctx("research", dict(declared, not_read=["cited"])))
+    check("but material the reviewer did not read still leaves the lens incomplete", st["reviews"]["status"], "incomplete")
+    st = dfcore.adjudicate(research_ctx("change", declared))
+    check("and on a change, declared unverified scope still holds the lens", st["reviews"]["status"], "incomplete")
+
     sys.path.insert(0, STEPS)
     import drive
     d = lambda **p: drive.decide({"ok": True, **p}, None, 0, 3600)[:2]
