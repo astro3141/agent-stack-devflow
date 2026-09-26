@@ -12,6 +12,9 @@ v0.1). What is common lives here; what is one project's lives in that project's 
 | **a task's state** | the GitHub issue (task block + one state comment) and the commit status `devflow/verdict` on the judged head | — |
 | **design and reusable knowledge** | Notion | — |
 
+**Using it: [RUNBOOK.md](RUNBOOK.md)** — setup, starting a task, what each waiting state asks of you,
+the commands, the limits, where to look. This page is the design.
+
 Nothing in this package names a project. The infra scanner's KISA / Item ID / Foundation rules are
 in `infra-scanner-io/.devflow/`, not here.
 

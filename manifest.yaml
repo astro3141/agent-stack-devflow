@@ -12,6 +12,8 @@
 name: devflow
 version: 0.1.0
 description: Development workflow — prepare, implement, review, judge and integrate a task on GitHub
+# The operator's and user's manual: setup, the waiting states and what each asks, the commands.
+runbook: RUNBOOK.md
 workflows:
   devflow: devflow.yaml            # one pass over a task: judge it, and act on it when devflow may
   devflow-auto: devflow-auto.yaml  # passes, one after another, until a person or CI has the next move
