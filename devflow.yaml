@@ -198,6 +198,7 @@ agents:
       next: {type: string}
       state: {type: string}
       model_calls: {type: number}
+      watch: {type: string}
       error: {type: string}
     routes:
       - to: act
@@ -433,6 +434,7 @@ output:
   issue: "{{ workflow.input.issue }}"
   frame: "{{ evaluate.output.frame }}"
   head: "{{ evaluate.output.head }}"
+  watch: "{{ adjudicate.output.watch }}"
   need_models: "{{ evaluate.output.need_models }}"
   verdict: "{{ publish.output.verdict }}"
   phase: "{{ publish.output.phase }}"

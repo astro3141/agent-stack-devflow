@@ -37,7 +37,9 @@ def settle(project, head, poll_s, budget_s, sleep=time.sleep):
     waited, last = 0, None
     while waited <= budget_s:
         try:
-            runs = rem.check_runs(head)
+            # devflow's own verdict is not CI: it stays in progress while devflow waits for CI
+            # (measured: a merge whose checks had all passed was watched for an hour)
+            runs = [r for r in rem.check_runs(head) if not str(r.get("name") or "").startswith("devflow/")]
         except remote_mod.RemoteError:
             runs = None
         if runs:
@@ -67,7 +69,7 @@ def one_pass(run_id, project, issue, profile, impl_profile, review_mode):
     return {"run": run_id, "verdict": out.get("verdict"), "phase": out.get("phase"),
             "progress": out.get("progress"), "wait": out.get("wait"), "owner": out.get("owner"),
             "next": out.get("next"), "acted": out.get("acted"), "delivered": out.get("delivered"),
-            "head": out.get("head"), "need_models": out.get("need_models"),
+            "head": out.get("head"), "watch": out.get("watch"), "need_models": out.get("need_models"),
             "state": v.get("state"), "ok": bool(v.get("completed_ok")),
             "reason": v.get("terminated_reason") or v.get("reason") or ""}
 
@@ -123,7 +125,7 @@ def main(argv):
             break
         if ci == -1:                          # CI on a head: wait for it here, then pass again
             m = re.search(r"\b([0-9a-f]{40})\b", str(p.get("delivered") or ""))
-            head = m.group(1) if m else p.get("head")
+            head = m.group(1) if m else (p.get("watch") or p.get("head"))
             ok, waited = settle(project, head, poll_s, max_wait) if head else (False, 0)
             p["ci_waited_s"] = waited
             if not ok:

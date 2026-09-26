@@ -146,7 +146,10 @@ def main(argv):
                       "integrate": "yes" if (st["verdict"] == "PASS" and st["phase"] == "integrate" and not st["wait"]) else "no",
                       "reason": "; ".join(st["blockers"][:3])[:300] or (st.get("next") or ""),
                       "next": st.get("next") or "", "state": os.path.join(D, "state.json"),
-                      "model_calls": calls, "error": "; ".join(st["execution"]["errors"])[:300]},
+                      "model_calls": calls,
+                      # the commit whose checks the task waits on: after a merge, the merge commit
+                      "watch": str((ev.get("finalize") or {}).get("merge_commit") or head or ""),
+                      "error": "; ".join(st["execution"]["errors"])[:300]},
                      ensure_ascii=False))
     return 0
 
@@ -156,5 +159,5 @@ if __name__ == "__main__":
         sys.exit(main(sys.argv[1:]))
     except Exception as e:
         print(json.dumps({"status": "TOOL_FAILURE", "verdict": "UNDECIDED", "phase": "", "progress": "",
-                          "integrate": "no", "reason": "", "next": "", "state": "", "model_calls": 0,
+                          "integrate": "no", "reason": "", "next": "", "state": "", "model_calls": 0, "watch": "",
                           "error": f"{type(e).__name__}: {e}"[:300]}))

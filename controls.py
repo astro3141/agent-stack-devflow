@@ -1474,6 +1474,24 @@ def controls_implement():
           drive.decide(holdable, dict(holdable), 0, 3600)[:2], (True, -2))
     check("drive: and that wait is bounded", drive.decide(holdable, dict(holdable), 3600, 3600)[0], False)
 
+    class _Checks:
+        sha = None
+
+        def check_runs(self, sha):
+            self.sha = sha
+            return [{"name": "scanner-quick", "status": "completed"}, {"name": "devflow/verdict", "status": "in_progress"}]
+    stub, orig = _Checks(), dfcore.open_remote
+    dfcore.open_remote = lambda *a, **k: stub
+    try:
+        settled = drive.settle("scanner-fixture", "m" * 40, 1, 10, sleep=lambda s: None)
+    finally:
+        dfcore.open_remote = orig
+    check("drive: CI has settled when the checks have — devflow's own in-progress verdict is not CI",
+          (settled[0], stub.sha), (True, "m" * 40))
+    check("drive: after a merge it watches the merge commit (the pass names it), not the pull request's head",
+          ("watch" in open(os.path.join(STEPS, "drive.py"), encoding="utf-8").read(),
+           "merge_commit" in open(os.path.join(STEPS, "adjudicate.py"), encoding="utf-8").read()), (True, True))
+
 
 def controls_auth():
     print("\nauth — the panel's GitHub login: used as it is, refreshed before it expires, never guessed")
