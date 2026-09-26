@@ -700,11 +700,17 @@ def adjudicate(ctx):
                 "decision", "a person decides between the implementation and the finding; no further automatic round",
                 "decision owner", "a decision is recorded, or new evidence is added"))
         max_rework = hist.get("max_rework")
-        if max_rework is not None and int(hist.get("rework") or 0) >= int(max_rework):
-            notes.append(f"the automatic rework limit ({max_rework}) is reached")
+        granted = int(ctx.get("rework_granted") or 0)
+        if max_rework is not None and int(hist.get("rework") or 0) >= int(max_rework) + granted:
+            notes.append(f"the automatic rework limit ({max_rework}"
+                         + (f", plus {granted} granted" if granted else "") + ") is reached")
+            head = str((ctx.get("pr") or {}).get("head_sha") or "")[:12]
             return out("verify_review", "NEEDS_DECISION", review_status, wait(
-                "decision", "the project allows no further automatic rework: a person takes over",
+                "decision", "the project allows no further automatic rework: a person takes over — "
+                f"or grants one more round with `/devflow approve rework {head}`",
                 "decision owner", "a decision is recorded"))
+        if granted:
+            notes.append(f"{granted} automatic rework round(s) granted by a person beyond the project's limit")
         return out("implement", "REQUEST_CHANGES", review_status, wait(
             "implementation", "fix the listed items and push", "implementer", "a new head commit"))
     if "CONTRACT_GAP" in reviewer_verdicts:

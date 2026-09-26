@@ -335,6 +335,22 @@ def controls_flow():
         check("the first REQUEST_CHANGES returns to implement", verdict(r1), "REQUEST_CHANGES")
         check("the same failure again after the one allowed rework: NEEDS_DECISION, no further loop",
               (verdict(r2), r2["state"]["wait"]["reason"]), ("NEEDS_DECISION", "decision"))
+        check("and the wait names how a person grants one more round",
+              f"/devflow approve rework {new[:12]}" in r2["state"]["wait"]["need"], True)
+        s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
+            {"id": 91, "user": "impl-bot", "body": f"/devflow approve rework {new[:12]}"}))
+        r3 = s.run()
+        check("a grant from an implementer is not counted: still NEEDS_DECISION", verdict(r3), "NEEDS_DECISION")
+        s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
+            {"id": 92, "user": "astro3141", "body": f"/devflow approve rework {new[:12]}"}))
+        r4 = s.run()
+        check("an approver grants one more round for that head: REQUEST_CHANGES, back to implement",
+              (verdict(r4), phase(r4)), ("REQUEST_CHANGES", "implement"))
+        newer = s.edit(lambda db: build.push_new_head(db, {"items/kisa/U-54.yaml": "id: U-54\n# v3\n"}))
+        s.edit(lambda db: set_runs(db, newer, fail_publish))
+        r5 = s.run()
+        check("the grant is spent by that round: the next failing head escalates again",
+              verdict(r5), "NEEDS_DECISION")
     finally:
         s.close()
 

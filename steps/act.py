@@ -54,7 +54,10 @@ def decide(st, ev):
     if st.get("phase") != "implement" or w.get("reason") != "implementation":
         return "none", "the next move is not an implementation"
     hist = st.get("history") or {}
-    rounds, cap = int(hist.get("implement_rounds") or 0), int(impl.get("max_rounds") or 3)
+    # a person's grant of one more rework round (`/devflow approve rework <head>`) is one more
+    # round here too — the grant would be empty if the round cap still refused it
+    rounds = int(hist.get("implement_rounds") or 0)
+    cap = int(impl.get("max_rounds") or 3) + int(ev.get("rework_granted") or 0)
     if rounds >= cap:
         return "none", f"devflow has started {rounds} implementation round(s) for this task (implement.max_rounds {cap})"
     pr = st.get("pr")

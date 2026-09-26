@@ -226,6 +226,11 @@ def main(argv):
     gates = (pol.get("human_gates") or {}).get(cls.get("change_class"), [])
     given, excepts = approvals(comments, pol, impl)
     ev["approvals"] = given + [dict(e, gate="except") for e in excepts]
+    # one more automatic rework round, granted by a person for one head — the project's limit is
+    # a default, and passing it is a decision (`/devflow approve rework <head sha>`); a grant for
+    # an earlier head is spent, and each head's grant counts once
+    grants = {a["value"][:12] for a in given if a["gate"] == "rework" and a["counted"]}
+    ev["rework_granted"] = len(grants)
     ev["end_point"] = str(task.get("end_point") or (pol.get("defaults") or {}).get("end_point") or "integration")
     loop = pol.get("loop") or {}
     ev["history"]["max_no_progress"] = int(loop.get("max_no_progress") or 3)
