@@ -231,6 +231,12 @@ def main(argv):
     # an earlier head is spent, and each head's grant counts once
     grants = {a["value"][:12] for a in given if a["gate"] == "rework" and a["counted"]}
     ev["rework_granted"] = len(grants)
+    # one more round of model review for one head, past the budget and the round limit
+    # (`/devflow approve reviews <head sha>`) — the limits are defaults, and spending past them is a
+    # person's decision; a grant is spent by the round it paid for (adjudicate records it)
+    head12 = str((pr or {}).get("head_sha") or "")[:12]
+    ev["review_grant"] = bool(head12) and head12 not in (ev["history"].get("review_grants_spent") or []) \
+        and any(a["gate"] == "reviews" and a["counted"] and a["value"][:12] == head12 for a in given)
     ev["end_point"] = str(task.get("end_point") or (pol.get("defaults") or {}).get("end_point") or "integration")
     loop = pol.get("loop") or {}
     ev["history"]["max_no_progress"] = int(loop.get("max_no_progress") or 3)
@@ -453,12 +459,14 @@ def main(argv):
                 a["by"] = "deferred"
                 a["why"] = "waiting for this head's checks to complete without a failure"
     model_needed = [a for a in assignments if a["by"] == "model"]
-    if used + len(model_needed) > int(budget.get("model_calls") or 6):
+    grant = bool(ev.get("review_grant"))
+    if used + len(model_needed) > int(budget.get("model_calls") or 6) and not grant:
         for a in model_needed:
             a["by"] = "external"
-            a["why"] = f"the model review budget ({budget.get('model_calls') or 6} calls per task) is spent"
+            a["why"] = (f"the model review budget ({budget.get('model_calls') or 6} calls per task) is spent — "
+                        f"`/devflow approve reviews {str(pr['head_sha'])[:12]}` grants one more round")
     rounds = int(ev["history"].get("review_rounds") or 0)
-    if rounds >= int(rv.get("max_rounds") or 3):
+    if rounds >= int(rv.get("max_rounds") or 3) and not grant:
         for a in assignments:
             if a["by"] == "model":
                 a["by"] = "external"

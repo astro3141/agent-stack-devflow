@@ -109,6 +109,9 @@ def main(argv):
     if calls:
         hist["model_calls"] = int(hist.get("model_calls") or 0) + calls
         hist["review_rounds"] = int(hist.get("review_rounds") or 0) + 1
+        if ev.get("review_grant"):
+            # the granted round is spent by running, whatever it concluded
+            hist["review_grants_spent"] = list(hist.get("review_grants_spent") or []) + [str(head or "")[:12]]
     if st["verdict"] == "REQUEST_CHANGES":
         if hist.get("last_rc_head") != head:
             hist["rework"] = int(hist.get("rework") or 0) + 1

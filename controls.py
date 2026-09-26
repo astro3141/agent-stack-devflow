@@ -727,6 +727,22 @@ def controls_evidence():
         ev = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json")))
         check("the model budget spent: no model review, the assignment waits for a person",
               (r["evaluate"].get("need_models"), ev["assignments"][0]["by"], verdict(r)), ("no", "external", None))
+        head = R(s.db)["pulls"]["7"]["head_sha"]
+        check("and the wait names the grant", f"/devflow approve reviews {head[:12]}" in r["state"]["wait"]["need"], True)
+        s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
+            {"id": 78, "user": "impl-bot", "body": f"/devflow approve reviews {head[:12]}"}))
+        r = s.run(review_mode="model")
+        check("a grant from an implementer is not counted", r["evaluate"].get("need_models"), "no")
+        s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
+            {"id": 79, "user": "astro3141", "body": f"/devflow approve reviews {head[:12]}"}))
+        r = s.run(review_mode="model")
+        check("an approver's grant for this head: one more model round, past the budget",
+              r["evaluate"].get("need_models"), "yes")
+        s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
+            {"id": 80, "user": "devflow", "body": '<!-- devflow:state {"history":{"model_calls":16,'
+             f'"review_grants_spent":["{head[:12]}"]}}}} -->'}))
+        r = s.run(review_mode="model")
+        check("once that round ran, the grant is spent: the budget holds again", r["evaluate"].get("need_models"), "no")
     finally:
         s.close()
 

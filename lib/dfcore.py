@@ -748,8 +748,11 @@ def adjudicate(ctx):
             blockers.append(f"lenses with unverified scope: {sorted(unverified)}")
         if not independent_ok:
             blockers.append("the independent review (an identity separate from the implementer, on this head) is missing")
+        head = str((pr or {}).get("head_sha") or "")[:12]
         return out("verify_review", None, review_status, wait(
-            "review", "complete the required reviews for this head", "reviewer", "the reviews are on this head"))
+            "review", "complete the required reviews for this head — a person, or, when the model "
+            f"budget or round limit is spent, `/devflow approve reviews {head}` for one more model round",
+            "reviewer", "the reviews are on this head"))
     if shared.get("required") and shared.get("ops_match") is not True:
         blockers.append("shared artifact: the operation comparison has no result")
         return out("verify_review", None, review_status, wait(

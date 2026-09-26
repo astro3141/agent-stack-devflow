@@ -66,7 +66,7 @@ The state comment ends with `waiting (<reason>): <need> · owner: <who> · resum
 | `implementation` | bring the change onto the canonical head by hand | the same files changed on both sides: merge them yourself |
 | `verification` | CI on the head | nothing — devflow-auto waits for the checks itself |
 | `verification` | a required check was skipped | make it run, or `/devflow except <check> <head sha> <reason and alternative evidence>` (never for a FAIL) |
-| `review` | complete the required reviews | nothing while a model may supply them (devflow-auto waits for an eligible provider); otherwise a person posts a PR review with a ` ```devflow-review ` block for **this** head |
+| `review` | complete the required reviews | nothing while a model may supply them (devflow-auto waits for an eligible provider); if the model budget or round limit is spent, `/devflow approve reviews <head sha>`; or a person posts a PR review with a ` ```devflow-review ` block for **this** head |
 | `merge` | merge pull request #n at exactly <sha> | merge it — agents do not merge; merging another head is reported as NEEDS_DECISION |
 | `integration_order` | another change holds the shared artifact | nothing — run again after it lands |
 | `environment` | the machinery failed | read the `tool:` lines; fix it; run again (every effect is guarded) |
@@ -80,6 +80,7 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 | `/devflow approve <gate> <task digest>` | a gate bound to the task (e.g. `gate1`, `criterion`) |
 | `/devflow approve <gate> <head sha>` | a gate bound to a head (e.g. `gate2`) |
 | `/devflow approve rework <head sha>` | one more automatic rework round for that head, beyond `loop.max_rework` (and `implement.max_rounds`); spent by that round |
+| `/devflow approve reviews <head sha>` | one more round of model review for that head, past `reviews.budget.model_calls` and `reviews.max_rounds`; spent by the round it pays for |
 | `/devflow except <check> <head sha> <reason and alternative evidence>` | a required check that could not run counts, for that head only; never a FAIL |
 
 ## 7. Limits that stop automatic work
@@ -89,8 +90,8 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 | automatic reworks | `loop.max_rework` | NEEDS_DECISION; `/devflow approve rework` grants one more |
 | same blocker, no progress | `loop.max_no_progress` | NEEDS_DECISION |
 | implementation rounds (incl. failed ones) | `implement.max_rounds` | devflow stops acting; the reason is on the issue |
-| model calls per task | `reviews.budget.model_calls` | reviews go to a person |
-| review rounds per task | `reviews.max_rounds` | reviews go to a person |
+| model calls per task | `reviews.budget.model_calls` | reviews go to a person; `/devflow approve reviews` grants one more model round |
+| review rounds per task | `reviews.max_rounds` | reviews go to a person; `/devflow approve reviews` grants one more model round |
 | a pass's wall time | the workflow's `timeout_seconds` | the pass ends; start again |
 | one model call | the profile's `execution.timeout_ms` | the call produces nothing; the round is spent |
 
