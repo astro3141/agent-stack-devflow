@@ -1362,6 +1362,31 @@ def controls_implement():
               ("incomplete", True))
         check("and the lenses that may read it must read it — it is there",
               ("cited" in ev2["lens_defs"]["base"]["read"], "cited" in ev2["lens_defs"]["research-record"]["read"]), (True, True))
+        check("its reviewers are told a finding blocks only when it endangers what the served items need",
+              ("A finding\n  is **blocking** only when it endangers them" in prompt, "{BLOCKING}" in prompt), (True, False))
+
+        def blocking_review(affects):
+            def put(db):
+                h = branch_of(db)
+                n = str(r2["state"]["history"]["pr"])
+                f = {"lens": "research-record", "severity": "blocking", "claim": "a peripheral sentence has no source",
+                     "basis": {"kind": "observation", "ref": "docs/research/t-0054.md:3"}, "evidence": "no source named"}
+                if affects:
+                    f["affects"] = affects
+                R(db).setdefault("reviews", {})[n] = [{"id": 951, "user": "rev-person", "commit_id": h, "state": "COMMENTED",
+                                                      "body": build.review_body(h, ["base", "research-record"], verdict="REQUEST_CHANGES",
+                                                                                findings=[f], digest=canonical_digest(db),
+                                                                                basis=canonical_basis(db))}]
+            return put
+        s.edit(blocking_review(None))
+        r4 = s.run_pass(research_model)
+        check("a blocking finding on a record that names nothing it endangers: shown as advisory, no further round",
+              (verdict(r4), r4["act"].get("do"), any("name nothing they endanger" in n for n in r4["state"].get("notes") or [])),
+              (None, "none", True))
+        s.edit(blocking_review("U-54: which unit is active"))
+        r5 = s.run_pass(research_model)
+        check("one that names the item condition it endangers holds the record: REQUEST_CHANGES",
+              verdict(r5), "REQUEST_CHANGES")
     finally:
         s.close()
 

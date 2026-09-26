@@ -26,7 +26,7 @@ Answer every question of every lens, by its id. Read the material kinds your len
 - A **blocking** finding must point at something checkable: `basis.kind` is one of `criterion`,
   `contract`, `observation`, `test`, `task`, and `basis.ref` names the exact place (file and line,
   clause, check name). A concern you cannot support that way is not blocking.
-- Two different things, kept apart:
+{BLOCKING}- Two different things, kept apart:
   - `unverified` — a question of your lens you **could not answer** from the materials (the material
     it needs is not there, or not shown). The lens is then not complete. Do **not** turn "I could not
     check X" into a defect.
@@ -67,7 +67,7 @@ Write exactly one file, `{OUT}`, in the run's workspace (use the file tool), con
   "findings": [
     {"lens": "<lens id>", "severity": "blocking | advisory", "claim": "<what is wrong>",
      "basis": {"kind": "criterion | contract | observation | test | task", "ref": "<exact place>"},
-     "evidence": "<what you saw>"}
+     "evidence": "<what you saw>", "affects": "<research lane, blocking only: the question ID or the item and condition it endangers>"}
   ],
   "unverified": {"<lens id>": ["<a question of the lens you could not answer, and why>"]},
   "limits": {"<lens id>": ["<what your answer relied on, or does not reach>"]},

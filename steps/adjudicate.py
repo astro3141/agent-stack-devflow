@@ -101,7 +101,8 @@ def main(argv):
            "shared": ev.get("shared"), "finalize": ev.get("finalize"), "history": ev.get("history") or {},
            "tool": ev.get("tool"), "end_point": ev.get("end_point"),
            "violations": ev.get("violations"), "flow": ev.get("flow"), "prepare_only": ev.get("prepare_only"),
-           "rework_granted": ev.get("rework_granted"), "reviews_budget_spent": ev.get("reviews_budget_spent")}
+           "rework_granted": ev.get("rework_granted"), "reviews_budget_spent": ev.get("reviews_budget_spent"),
+           "lane": ev.get("lane")}
     st = dfcore.adjudicate(ctx)
 
     hist = dict(ev.get("history") or {})

@@ -58,6 +58,12 @@ An item starts from its own questions; research answers only what an item needs.
 Changing a research task's block (its goal, its questions) makes devflow rewrite its open record
 for the task as it now stands.
 
+A research record goes round again only when its items would be worse off: a blocking review
+finding on it must name, in `affects`, the question or item condition it endangers — a fact the
+items need that is missing, or one they rely on that cannot be trusted. Anything else is advisory:
+shown on the issue, merged with the record, no further round. (A person's ` ```devflow-review `
+follows the same rule.)
+
 ## 5. When it waits for you
 
 The state comment ends with `waiting (<reason>): <need> · owner: <who> · resumes when: <condition>`.

@@ -685,7 +685,17 @@ def adjudicate(ctx):
     findings = [dict(f, lens=f.get("lens") or (r["complete"] or ["base"])[0],
                      by=(r.get("reviewer") or {}).get("identity"))
                 for r in valid for f in r["findings"]]
-    blocking, unsupported, _ = classify_findings(findings)
+    if ctx.get("lane") == "research":
+        # a research record goes round again only for what its items need: a blocking finding that
+        # names no question or item it endangers is shown as advisory
+        loose = [f for f in findings if f.get("severity") == "blocking" and not str(f.get("affects") or "").strip()]
+        if loose:
+            notes.append(f"{len(loose)} blocking finding(s) on the research record name nothing they endanger "
+                         "(`affects`): shown as advisory")
+        findings = [dict(f, severity="advisory") if f in loose else f for f in findings]
+    blocking, unsupported, advisory = classify_findings(findings)
+    if ctx.get("lane") == "research" and advisory:
+        notes.append(f"{len(advisory)} advisory finding(s) on the record stay noted; they do not hold it")
     fps = sorted({finding_fingerprint(f) for f in blocking})
     ctx["_review_detail"] = {"required": required, "covered": sorted(covered), "missing": missing,
                              "unverified": unverified, "independent_ok": independent_ok,

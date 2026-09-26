@@ -657,6 +657,21 @@ def cited_paths(rem, pr, changed, limit=20):
     return [r for r in out[:limit * 3] if rem.file_at(pr["head_sha"], r) is not None][:limit]
 
 
+# A research record is worth another round only when the items it serves would be worse off
+# without it: a fact they need is missing, or one they would rely on cannot be trusted.
+RESEARCH_BLOCKING = """- This is a research record: it serves the task's `items` and answers its `questions`. A finding
+  is **blocking** only when it endangers them, and it names what in `affects`:
+  - *insufficient* — a question the task lists, or a fact the served items need to be implemented,
+    is not established by the record;
+  - *unreliable* — a claim the served items would rely on is wrong, is attributed to a source that
+    does not state it, or is stated wider than its evidence reaches.
+  Everything else — a claim no served item relies on, wording, a peripheral citation, something
+  that should be marked unverified but decides nothing for the items — is **advisory**: the record
+  is merged with it noted, and no further round is spent on it. A blocking finding without
+  `affects` is treated as advisory.
+"""
+
+
 def write_prompt(a, chosen, frame, ev):
     tpl = open(os.path.join(PKG, "prompts", "review.md"), encoding="utf-8").read()
     lens_text = []
@@ -672,6 +687,7 @@ def write_prompt(a, chosen, frame, ev):
                .replace("{WEB}", refs.web_hosts(dfcore.RESEARCH_REVIEWER, PKG)
                         if a.get("principal") == dfcore.RESEARCH_REVIEWER
                         else "none — this review has no page fetching; search results, where your tools have them, are secondary sources")
+               .replace("{BLOCKING}", RESEARCH_BLOCKING if ev.get("lane") == "research" else "")
                .replace("{MATERIALS}", os.path.join(D, "materials"))
                .replace("{OUT}", os.path.join(WS, f"review_{a['reviewer']}.json")))
     p = os.path.join(D, f"prompt_{a['reviewer']}.md")
