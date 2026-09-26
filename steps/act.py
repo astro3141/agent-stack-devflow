@@ -51,17 +51,26 @@ def decide(st, ev):
     if (ev.get("flow") or {}).get("name", "pull_request") != "pull_request":
         return "none", f"this change class is published through the {ev['flow']['name']} flow, by a person"
     w = st.get("wait") or {}
-    if st.get("phase") != "implement" or w.get("reason") != "implementation":
-        return "none", "the next move is not an implementation"
     hist = st.get("history") or {}
+    modes = impl.get("modes") or {}
+    pr = st.get("pr")
     # a person's grant of one more rework round (`/devflow approve rework <head>`) is one more
     # round here too — the grant would be empty if the round cap still refused it
     rounds = int(hist.get("implement_rounds") or 0)
     cap = int(impl.get("max_rounds") or 3) + int(ev.get("rework_granted") or 0)
+    # a research record is written for the task as its block states it: when a person changes the
+    # block (the question, the scope), devflow's open record is rewritten for it — once per change
+    if (task.get("type") in modes and pr and pr.get("state") == "open" and not pr.get("merged")
+            and pr.get("head_ref") == dfcore.task_branch(task)
+            and (ev.get("implementers") or {}).get("devflow_only")
+            and hist.get("research_task_digest") != ev.get("task_digest")):
+        if rounds >= cap:
+            return "none", f"the task changed, but devflow has started {rounds} round(s) for it (implement.max_rounds {cap})"
+        return "research", "the task block changed since the record was written: rewrite it for the task as it is now"
+    if st.get("phase") != "implement" or w.get("reason") != "implementation":
+        return "none", "the next move is not an implementation"
     if rounds >= cap:
         return "none", f"devflow has started {rounds} implementation round(s) for this task (implement.max_rounds {cap})"
-    pr = st.get("pr")
-    modes = impl.get("modes") or {}
     if task.get("type") in modes:
         if pr and (pr.get("head_ref") != dfcore.task_branch(task)
                    or not (ev.get("implementers") or {}).get("devflow_only")):

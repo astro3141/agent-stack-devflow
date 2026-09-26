@@ -30,9 +30,10 @@ Classification the project's rules gave it so far:
   by the research lane and reviewed. Build on them and cite them:
 {RESEARCH_RECORDS}
   You cannot fetch web pages ({WEB_HOSTS}). A fact the mapping needs that no record establishes is
-  not guessed and not looked up here: it goes into `decisions` as "research needed: <topic> —
-  <the question>", and preparation stops there, so the research lane answers it once for every
-  item that needs it.
+  not guessed and not looked up here: it goes into `research` (below) as a question, and this item
+  waits for it — only for the questions it names — so the research lane answers it once for every
+  item that needs it. A record answers facts about systems; how this project's code observes
+  them, and what that means for this item, is **your** analysis, not the record's.
 
 ## What the project asks of preparation
 
@@ -44,11 +45,25 @@ Classification the project's rules gave it so far:
    `{REPO}/.devflow/templates/` gives. Every mapping carries its confirmation state honestly:
    `confirmed` only when you compared the official source's own text for it; otherwise
    `provisional` or `unresolved`, with what is missing.
-2. `{REPO}/{RESEARCH_PATH}` — what this task relies on: each fact, and the research record (and
-   line) it comes from, or the repository file it was read from; and how each will be verified (a
-   test or scenario name, or "not verified"). Where reference material observes something the
-   mapping does not, say so and whether it matters. Reference material is evidence of how something
-   was collected before; it is never the criterion.
+2. `{REPO}/{RESEARCH_PATH}` — the item analysis. Start from the questions this item must answer
+   (read the official condition first; do not start by collecting everything about the product),
+   then these sections:
+   - **Criterion and scope** — the official version, clause and target; the conditions that decide
+     the result; the supported scope.
+   - **Facts relied on** — each fact with where it comes from (a merged research record and its
+     line, or a repository file and line at `{CANONICAL}`) and the conditions it holds under; the
+     questions still open and what each affects. Keep fact, observation (code read, a run: with its
+     environment and SHA), inference and unverified apart.
+   - **Mapping** — per condition: official condition → observation needed → Evidence →
+     Primitive/Check → Binding/Item → expected result, by meaning rather than by name.
+   - **Exceptional outcomes** — not applicable, target absent, collection failed, partial
+     collection: kept distinct, each mapped to a real state of the contracts.
+   - **Implementation plan** — what changes, who consumes it, what is reused and why, whether a
+     Foundation change is needed.
+   - **Verification plan** — normal, boundary and failure cases, with expected results derived from
+     the criterion and the contracts — never copied from what the current code outputs.
+   Where reference material observes something the mapping does not, say so and whether it
+   matters. Reference material is evidence of how something was collected before; never the criterion.
 3. `{OUT}` — JSON:
 
 ```json
@@ -57,12 +72,21 @@ Classification the project's rules gave it so far:
  "acceptance": ["observable completion criteria, one per line"],
  "plan": ["the files to add or change, and why"],
  "decisions": ["a question only a person can answer, with the options and their effect"],
- "gaps": ["a meaning the current contracts cannot express, and what would be needed"]}
+ "gaps": ["a meaning the current contracts cannot express, and what would be needed"],
+ "research": [{"id": "Q-<task id>-1",
+               "question": "the one question to answer",
+               "why": "the item and the condition whose result depends on it",
+               "scope": "product, version, distribution, run conditions",
+               "known": "what is already established, and what is missing",
+               "need": "the sources, observations or experiments that would answer it",
+               "accept": "what counts as answered"}]}
 ```
 
-`proceed` is false when anything in `decisions` or `gaps` must be settled before an implementation
-could be judged correct. Do not guess past such a point, and do not invent certainty: an
-unresolved question stated plainly is a correct preparation.
+`proceed` is false when anything in `decisions`, `gaps` or `research` must be settled before an
+implementation could be judged correct. Ask research only for what decides this item's result;
+a question that changes nothing here is left as a follow-up in the analysis. Do not narrow the
+supported scope to make a question go away. Do not guess past such a point, and do not invent
+certainty: an unresolved question stated plainly is a correct preparation.
 
 ## Time
 

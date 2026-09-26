@@ -23,7 +23,7 @@ What a repeat does: "guarded" — the branch is asked before it is moved, and a 
 for before one is opened.
 """
 REPEATABLE = "guarded"
-import fnmatch, json, os, subprocess, sys, time
+import fnmatch, json, os, re, subprocess, sys, time
 
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
@@ -133,7 +133,8 @@ def main(argv):
     if stage == "prepare" and prep is None:
         return finish(False, failure="preparation produced no prepare.json in this attempt")
     # the same reading as proceed.py: open questions hold the task, whatever `proceed` says
-    hold = bool(prep) and (prep.get("proceed") is not True or bool(prep.get("decisions") or prep.get("gaps")))
+    hold = bool(prep) and (prep.get("proceed") is not True
+                           or bool(prep.get("decisions") or prep.get("gaps") or prep.get("research")))
     if stage in ("prepare", "implement") and not hold and done is None:
         return finish(False, failure="the implementation produced no implement.json in this attempt")
 
@@ -224,13 +225,25 @@ def main(argv):
     st["blockers"] = []
     if hold:
         dec, gaps = list(prep.get("decisions") or []), list(prep.get("gaps") or [])
-        hist["prepare_hold"] = {"task_digest": ev.get("task_digest"), "decisions": dec, "gaps": gaps, "head": head}
-        report["hold"] = "decision" if dec else "contract_gap"
-        st.update(phase="prepare", verdict="NEEDS_DECISION" if dec else "CONTRACT_GAP", progress="waiting",
-                  blockers=[f"decision: {d}" for d in dec] + [f"contract gap: {g}" for g in gaps],
-                  wait={"reason": "decision" if dec else "contract_gap",
-                        "need": "answer preparation's questions in the task block (the task changes, and devflow prepares again)",
-                        "owner": "decision owner", "resume_when": "the task block records the decision"})
+        research = research_requests(task, prep)
+        hist["prepare_hold"] = {"task_digest": ev.get("task_digest"), "decisions": dec, "gaps": gaps,
+                                "research": research, "head": head}
+        report["hold"] = "decision" if dec else ("contract_gap" if gaps else "research")
+        blockers = ([f"decision: {d}" for d in dec] + [f"contract gap: {g}" for g in gaps]
+                    + [f"research needed: {q['id']} — {q.get('question')}" for q in research])
+        if dec or gaps:
+            st.update(phase="prepare", verdict="NEEDS_DECISION" if dec else "CONTRACT_GAP", progress="waiting",
+                      blockers=blockers,
+                      wait={"reason": "decision" if dec else "contract_gap",
+                            "need": "answer preparation's questions in the task block (the task changes, and devflow prepares again)",
+                            "owner": "decision owner", "resume_when": "the task block records the decision"})
+        else:
+            ids = ", ".join(q["id"] for q in research) or "(none named)"
+            st.update(phase="prepare", verdict=None, progress="waiting", blockers=blockers,
+                      wait={"reason": "research",
+                            "need": f"a research task that answers {ids}, merged under the project's research directory",
+                            "owner": "research lane",
+                            "resume_when": f"a merged research record lists {ids} under `answers:` (or `unanswered:`)"})
     else:
         hist.pop("prepare_hold", None)
         st.update(phase="verify_review", verdict=None, progress="waiting",
@@ -317,7 +330,22 @@ def deliver_research(project, reg, pol, impl, task, ev, st, hist, work, snap, re
                     "owner": "CI", "resume_when": "the required checks complete on that head"})
     st["notes"] = [f"devflow pushed {head[:12]} to {branch} ({task['type']} record, round {work.get('round')})"]
     st["next"] = st["wait"]["need"]
+    hist["research_task_digest"] = ev.get("task_digest")      # the task as this record was written for it
     return finish(True)
+
+
+def research_requests(task, prep):
+    """Preparation's research requests, each with a question ID a research record can answer
+    (`Q-<task>-<n>` when preparation gave none) — the ID is how the item resumes."""
+    out = []
+    for i, q in enumerate(prep.get("research") or [], 1):
+        q = dict(q) if isinstance(q, dict) else {"question": str(q)}
+        qid = str(q.get("id") or "")
+        if not re.fullmatch(r"Q-[\w.-]*\w", qid):
+            qid = f"Q-{task['id']}-{i}"
+        q["id"] = qid
+        out.append(q)
+    return out
 
 
 def pr_body(task, ev, prep, done, hold):
@@ -329,8 +357,9 @@ def pr_body(task, ev, prep, done, hold):
         lines += ["## Preparation", prep.get("summary") or "", ""]
         lines += [f"- acceptance: {a}" for a in prep.get("acceptance") or []]
         if hold:
-            lines += ["", "**Waiting for a decision before implementation:**"]
+            lines += ["", "**Waiting before implementation:**"]
             lines += [f"- {d}" for d in (prep.get("decisions") or []) + (prep.get("gaps") or [])]
+            lines += [f"- research needed: {q['id']} — {q.get('question')}" for q in research_requests(task, prep)]
     if done:
         lines += ["", "## Implementation", done.get("summary") or ""]
         lines += [f"- {c}" for c in done.get("changed") or []]

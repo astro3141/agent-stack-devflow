@@ -46,14 +46,26 @@ lenses:
   # ---------------------------------------------------------------- devflow's own
   - id: research-record
     title: A research record others will build on
-    when: {task_types: [research, survey]}
+    when: {task_types: [research]}
     read: [diff, task, criteria]
     read_if_present: [cited, reference]
     questions:
-      - {id: sourced, q: "Does every claim name its source (URL and the date read, or file and line), say whether that source is primary, and say what it applies to (distribution, version, product)?"}
-      - {id: scope, q: "Is what could not be established marked as such — not verified, and why — rather than written as fact or left out?"}
-      - {id: not_criterion, q: "Does the record stay a record of facts: nothing in it decides what passes or fails, and reference material (earlier scripts, extracts) is never presented as a criterion?"}
-      - {id: usable, q: "Can an implementer act on it without redoing the research: the variants that change a result named, and for each how it will be verified?"}
+      - {id: attributed, q: "Does each claim match its source: the source it names actually states it (checked where the source is available to you), with the URL and date read or the file and line?"}
+      - {id: conditions, q: "Does each claim say what it applies to (product, version, distribution, run conditions), and does no claim reach wider than its source or observation?"}
+      - {id: kinds, q: "Are fact, observation (with its environment and input), inference (with what it rests on) and unverified kept apart — nothing inferred or planned presented as observed or sourced?"}
+      - {id: scope, q: "Is what could not be established marked as such — why, and how it could be — rather than written as fact or left out; and do the `answers:` / `unanswered:` lines match what the record actually establishes?"}
+      - {id: facts_only, q: "Does the record stay a record of facts about systems: nothing in it decides what passes or fails, maps the facts onto this project's collectors, evaluators or items, or presents reference material as a criterion?"}
+    submit: [basis.kind, basis.ref, claim, evidence]
+
+  - id: survey-record
+    title: A survey others will plan from
+    when: {task_types: [survey]}
+    read: [diff, task, criteria]
+    read_if_present: [cited, reference]
+    questions:
+      - {id: sourced, q: "Does every claim name its source (file and line, or a record), and is what could not be established marked as such?"}
+      - {id: not_criterion, q: "Does the survey decide nothing about what passes or fails, and never present reference material as a criterion?"}
+      - {id: usable, q: "Are the items mapped onto the contracts with the gaps, grouped decisions, research questions and order named, so each can become a task?"}
     submit: [basis.kind, basis.ref, claim, evidence]
 
   - id: criteria-trace

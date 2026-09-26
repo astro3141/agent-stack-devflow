@@ -40,14 +40,23 @@ of those sentences and what each one asks.
 
 ## 4. Order of work for a new area
 
-Research is a lane of its own. For items that share products or open questions:
+An item starts from its own questions; research answers only what an item needs.
 
-1. **survey** task (`type: survey`, `items: [...]`) — maps the items onto the contracts; lists the
-   contract gaps (Foundation proposals), the grouped decisions, the research topics, an order.
-2. **research** tasks (`type: research`, `topic: ...`), one per product — facts with sources,
-   reviewed by two models, merged under the project's research directory.
-3. **item** tasks — preparation cites the merged records; a fact no record establishes stops it with
-   `research needed: …` (open a research task for it).
+1. **item** task — preparation reads the official condition, writes the item analysis (criterion
+   and scope, facts relied on, mapping, exceptional outcomes, implementation and verification
+   plans) and cites merged research records. A fact no record establishes becomes a research
+   request with an ID (`Q-<task>-<n>`); the item waits (`research`) for those questions only.
+2. **research** task (`type: research`, `topic: ...`, `questions: [Q-…]`) — facts about systems
+   with their sources, and nothing about how the project's code observes them. The record's
+   `answers:` / `unanswered:` lines name the questions it settles. Reviewed by two models.
+3. When the record is **merged**, the waiting item resumes by itself: an answered question
+   releases it (devflow prepares again, then implements); a question the record lists as
+   `unanswered:` becomes a decision on the item (scope, another source, or new research).
+4. **survey** task (`type: survey`, `items: [...]`) — only when several items share questions,
+   gaps or decisions: maps them, and gives an order.
+
+Changing a research task's block (its goal, its questions) makes devflow rewrite its open record
+for the task as it now stands.
 
 ## 5. When it waits for you
 
@@ -56,7 +65,9 @@ The state comment ends with `waiting (<reason>): <need> · owner: <who> · resum
 | reason | typical need | what you do |
 |---|---|---|
 | `decision` | answer the listed decisions | record the answer **in the task block** (the task changes, and devflow prepares again) |
-| `decision` | the automatic rework limit is reached | read the blocking findings; to let devflow try once more on this head: `/devflow approve rework <head sha>`; or push a fix yourself (the branch becomes yours); or close |
+| `research` | a research task that answers the listed question IDs | open (or let the survey open) a research task with `questions: [Q-…]`; merge its record — the item resumes by itself |
+| `budget` | the automatic rework rounds are spent (the verdict stays REQUEST_CHANGES) | read the blocking findings; `/devflow approve rework <head sha>` for one more round; or push a fix yourself (the branch becomes yours); or close |
+| `budget` | the model review budget or round limit is spent | `/devflow approve reviews <head sha>` for one more model round, or review the head yourself |
 | `decision` | a reviewer asks for a decision | answer on the issue, in the task block |
 | `decision` | the same blocking condition came back without progress | decide between the implementation and the finding; add evidence, or change the task |
 | `decision` | merged outside the workflow / merged head ≠ judged head | review the merged change, or revert |
@@ -66,7 +77,7 @@ The state comment ends with `waiting (<reason>): <need> · owner: <who> · resum
 | `implementation` | bring the change onto the canonical head by hand | the same files changed on both sides: merge them yourself |
 | `verification` | CI on the head | nothing — devflow-auto waits for the checks itself |
 | `verification` | a required check was skipped | make it run, or `/devflow except <check> <head sha> <reason and alternative evidence>` (never for a FAIL) |
-| `review` | complete the required reviews | nothing while a model may supply them (devflow-auto waits for an eligible provider); if the model budget or round limit is spent, `/devflow approve reviews <head sha>`; or a person posts a PR review with a ` ```devflow-review ` block for **this** head |
+| `review` | complete the required reviews | nothing while a model may supply them (devflow-auto waits for an eligible provider); or a person posts a PR review with a ` ```devflow-review ` block for **this** head |
 | `merge` | merge pull request #n at exactly <sha> | merge it — agents do not merge; merging another head is reported as NEEDS_DECISION |
 | `integration_order` | another change holds the shared artifact | nothing — run again after it lands |
 | `environment` | the machinery failed | read the `tool:` lines; fix it; run again (every effect is guarded) |
@@ -87,11 +98,11 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 
 | limit | policy key | when it is reached |
 |---|---|---|
-| automatic reworks | `loop.max_rework` | NEEDS_DECISION; `/devflow approve rework` grants one more |
+| automatic reworks | `loop.max_rework` | the verdict stays REQUEST_CHANGES, waiting `budget`; `/devflow approve rework` grants one more |
 | same blocker, no progress | `loop.max_no_progress` | NEEDS_DECISION |
 | implementation rounds (incl. failed ones) | `implement.max_rounds` | devflow stops acting; the reason is on the issue |
-| model calls per task | `reviews.budget.model_calls` | reviews go to a person; `/devflow approve reviews` grants one more model round |
-| review rounds per task | `reviews.max_rounds` | reviews go to a person; `/devflow approve reviews` grants one more model round |
+| model calls per task | `reviews.budget.model_calls` | waiting `budget`: a person reviews, or `/devflow approve reviews` grants one more model round |
+| review rounds per task | `reviews.max_rounds` | waiting `budget`: a person reviews, or `/devflow approve reviews` grants one more model round |
 | a pass's wall time | the workflow's `timeout_seconds` | the pass ends; start again |
 | one model call | the profile's `execution.timeout_ms` | the call produces nothing; the round is spent |
 

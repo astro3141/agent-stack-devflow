@@ -102,6 +102,36 @@ def find_pr(rem, task, hist):
     return rem.find_pull(dfcore.task_branch(task))
 
 
+ANSWERS = re.compile(r"^\s*(answers|unanswered)\s*:\s*(.+)$", re.M | re.I)
+QID = re.compile(r"Q-[\w.-]*\w")
+
+
+def research_answers(rem, pol, canonical_head, ev):
+    """The question IDs merged research records answer, and those they closed without an answer
+    ({id: record}): each record's `answers:` / `unanswered:` lines, on the canonical head only — a
+    record still in review answers nothing yet."""
+    rdir = ""
+    for m in ((pol.get("implement") or {}).get("modes") or {}).values():
+        for w in m.get("writes") or []:
+            rdir = rdir or w.rstrip("/*")
+    answered, closed = set(), {}
+    if not rdir:
+        return answered, closed
+    try:
+        for path in rem.list_dir(canonical_head, rdir):
+            if not path.endswith(".md"):
+                continue
+            for kind, ids in ANSWERS.findall(rem.file_at(canonical_head, path) or ""):
+                for q in QID.findall(ids):
+                    if kind.lower() == "answers":
+                        answered.add(q)
+                    else:
+                        closed.setdefault(q, path)
+    except remote_mod.RemoteError as e:
+        ev["tool"].append(f"RemoteError: {e}")
+    return answered, {q: p for q, p in closed.items() if q not in answered}
+
+
 def approvals(comments, pol, implementers):
     """Human decisions given on the issue, each bound to the exact thing decided:
 
@@ -130,7 +160,7 @@ def main(argv):
     review_mode = (argv[3] if len(argv) > 3 and argv[3] else "model")
     os.makedirs(D, exist_ok=True)
     ev = {"schema": "devflow/evaluation@1", "run": RUN, "at": time.time(), "project": project,
-          "issue": issue_no, "review_mode": review_mode, "tool": [], "prepare": {"gaps": [], "decisions": [], "problems": []}}
+          "issue": issue_no, "review_mode": review_mode, "tool": [], "prepare": {"gaps": [], "decisions": [], "problems": [], "research": []}}
 
     def done(**extra):
         ev.update(extra)
@@ -257,6 +287,22 @@ def main(argv):
     if hold and hold.get("task_digest") == task_digest:
         ev["prepare"]["decisions"] += [f"preparation: {d}" for d in hold.get("decisions") or []]
         ev["prepare"]["gaps"] += [f"preparation: {g}" for g in hold.get("gaps") or []]
+        # the research the item waits for: a question a merged record answers no longer holds it;
+        # one a record closed without an answer becomes a person's decision (the item still needs
+        # it); the rest keep waiting for the research lane
+        asked = list(hold.get("research") or [])
+        if asked:
+            answered, closed = research_answers(rem, pol, canonical_head, ev)
+            ev["research_answered"] = sorted(q["id"] for q in asked if q["id"] in answered)
+            for q in asked:
+                if q["id"] in answered:
+                    continue
+                if q["id"] in closed:
+                    ev["prepare"]["decisions"].append(
+                        f"research closed without an answer to {q['id']} ({closed[q['id']]}): {q.get('question')} — "
+                        "decide the supported scope, another source, or a new research task")
+                else:
+                    ev["prepare"]["research"].append(q)
     gate_state = []
     for g in gates:
         want = task_digest if g.get("binds") == "task" else (pr or {}).get("head_sha")
@@ -473,6 +519,8 @@ def main(argv):
             if a["by"] == "model":
                 a["by"] = "external"
                 a["why"] = "the review round limit is reached"
+    spent = [a["why"] for a in assignments if a["by"] == "external" and ("budget" in (a.get("why") or "") or "round limit" in (a.get("why") or ""))]
+    ev["reviews_budget_spent"] = spent[0] if spent else ""
     ev["lens_defs"] = chosen
     ev["prior_accepted"] = [a for a in prior.get("accepted_reviews") or [] if a.get("frame_id") == frame["id"]]
     ev["reviews"] = {"required": list(chosen), "why": why_chosen, "results": results,

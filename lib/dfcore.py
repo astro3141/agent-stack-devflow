@@ -564,16 +564,28 @@ def adjudicate(ctx):
         return {"reason": reason, "need": need, "owner": owner, "resume_when": resume}
 
     # 1. what preparation found stands: it is about the task, not about the code
+    research = list(prep.get("research") or [])
+    research_lines = [f"research needed: {q.get('id')} — {q.get('question')}" for q in research]
     if prep.get("decisions"):
         blockers.extend(f"decision: {d}" for d in prep["decisions"])
+        blockers.extend(research_lines)
         return out("prepare", "NEEDS_DECISION", wait=wait(
             "decision", "answer the listed decisions on the issue", "decision owner",
             "the issue records the decision"))
     if prep.get("gaps"):
         blockers.extend(f"contract gap: {g}" for g in prep["gaps"])
+        blockers.extend(research_lines)
         return out("prepare", "CONTRACT_GAP", wait=wait(
             "contract_gap", "analyse the gap in preparation, and whether a Foundation change is needed",
             "task owner", "the task is updated with the analysis"))
+    if research:
+        # a fact the item needs and no merged record establishes: not a verdict about anything —
+        # the item waits for the research lane, and only for the questions it named
+        blockers.extend(research_lines)
+        ids = ", ".join(str(q.get("id")) for q in research)
+        return out("prepare", None, wait=wait(
+            "research", f"a research task that answers {ids}, merged under the project's research directory",
+            "research lane", f"a merged research record lists {ids} under `answers:` (or `unanswered:`)"))
     if prep.get("problems"):
         blockers.extend(prep["problems"])
         return out("prepare", None, wait=wait(
@@ -693,7 +705,12 @@ def adjudicate(ctx):
         cond = sorted(set(fps) | {sha256(s)[:12] for s in semantic_fail})
         same = set(cond) <= set(hist.get("last_blocking") or [])
         ctx["_blocking_now"] = cond
-        ctx["_no_progress"] = int(hist.get("no_progress") or 0) + 1 if same else 0
+        # progress is measured between heads: judging the same head again is not another round
+        this_head = str((ctx.get("pr") or {}).get("head_sha") or "")
+        if this_head and hist.get("last_rc_head") == this_head:
+            ctx["_no_progress"] = int(hist.get("no_progress") or 0)
+        else:
+            ctx["_no_progress"] = int(hist.get("no_progress") or 0) + 1 if same else 0
         if ctx["_no_progress"] >= int(hist.get("max_no_progress") or 3):
             notes.append(f"the same blocking condition has come back {ctx['_no_progress']} time(s) without progress")
             return out("verify_review", "NEEDS_DECISION", review_status, wait(
@@ -705,10 +722,12 @@ def adjudicate(ctx):
             notes.append(f"the automatic rework limit ({max_rework}"
                          + (f", plus {granted} granted" if granted else "") + ") is reached")
             head = str((ctx.get("pr") or {}).get("head_sha") or "")[:12]
-            return out("verify_review", "NEEDS_DECISION", review_status, wait(
-                "decision", "the project allows no further automatic rework: a person takes over — "
-                f"or grants one more round with `/devflow approve rework {head}`",
-                "decision owner", "a decision is recorded"))
+            # the findings stand: running out of automatic rounds is an operating limit, not a
+            # decision about the change — the verdict stays what the evidence says
+            return out("verify_review", "REQUEST_CHANGES", review_status, wait(
+                "budget", "the automatic rework rounds are spent and the blocking findings stand: a person "
+                f"fixes them, or grants one more round with `/devflow approve rework {head}`",
+                "task owner", "a new head commit, or a grant"))
         if granted:
             notes.append(f"{granted} automatic rework round(s) granted by a person beyond the project's limit")
         return out("implement", "REQUEST_CHANGES", review_status, wait(
@@ -749,6 +768,12 @@ def adjudicate(ctx):
         if not independent_ok:
             blockers.append("the independent review (an identity separate from the implementer, on this head) is missing")
         head = str((pr or {}).get("head_sha") or "")[:12]
+        if ctx.get("reviews_budget_spent"):
+            notes.append(f"model reviews stopped: {ctx['reviews_budget_spent']}")
+            return out("verify_review", None, review_status, wait(
+                "budget", "the model review budget or round limit is spent for this task: a person reviews "
+                f"this head, or grants one more model round with `/devflow approve reviews {head}`",
+                "reviewer", "the reviews are on this head, or a grant"))
         return out("verify_review", None, review_status, wait(
             "review", "complete the required reviews for this head — a person, or, when the model "
             f"budget or round limit is spent, `/devflow approve reviews {head}` for one more model round",

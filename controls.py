@@ -333,14 +333,18 @@ def controls_flow():
         s.edit(lambda db: set_runs(db, new, fail_publish))
         r2 = s.run()
         check("the first REQUEST_CHANGES returns to implement", verdict(r1), "REQUEST_CHANGES")
-        check("the same failure again after the one allowed rework: NEEDS_DECISION, no further loop",
-              (verdict(r2), r2["state"]["wait"]["reason"]), ("NEEDS_DECISION", "decision"))
+        check("the same failure again after the one allowed rework: the verdict stands, the wait is the budget, no further loop",
+              (verdict(r2), r2["state"]["wait"]["reason"]), ("REQUEST_CHANGES", "budget"))
+        r2b = s.run()
+        check("judging that head again changes nothing: no rework counted, no no-progress escalation",
+              (verdict(r2b), r2b["state"]["wait"]["reason"], r2b["state"]["history"].get("rework")),
+              ("REQUEST_CHANGES", "budget", r2["state"]["history"].get("rework")))
         check("and the wait names how a person grants one more round",
               f"/devflow approve rework {new[:12]}" in r2["state"]["wait"]["need"], True)
         s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
             {"id": 91, "user": "impl-bot", "body": f"/devflow approve rework {new[:12]}"}))
         r3 = s.run()
-        check("a grant from an implementer is not counted: still NEEDS_DECISION", verdict(r3), "NEEDS_DECISION")
+        check("a grant from an implementer is not counted: still waiting on the budget", r3["state"]["wait"]["reason"], "budget")
         s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
             {"id": 92, "user": "astro3141", "body": f"/devflow approve rework {new[:12]}"}))
         r4 = s.run()
@@ -349,8 +353,8 @@ def controls_flow():
         newer = s.edit(lambda db: build.push_new_head(db, {"items/kisa/U-54.yaml": "id: U-54\n# v3\n"}))
         s.edit(lambda db: set_runs(db, newer, fail_publish))
         r5 = s.run()
-        check("the grant is spent by that round: the next failing head escalates again",
-              verdict(r5), "NEEDS_DECISION")
+        check("the grant is spent by that round: the next failing head waits on the budget again",
+              (verdict(r5), r5["state"]["wait"]["reason"]), ("REQUEST_CHANGES", "budget"))
     finally:
         s.close()
 
@@ -729,6 +733,7 @@ def controls_evidence():
               (r["evaluate"].get("need_models"), ev["assignments"][0]["by"], verdict(r)), ("no", "external", None))
         head = R(s.db)["pulls"]["7"]["head_sha"]
         check("and the wait names the grant", f"/devflow approve reviews {head[:12]}" in r["state"]["wait"]["need"], True)
+        check("the wait is the budget, told apart from reviews simply not done yet", r["state"]["wait"]["reason"], "budget")
         s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
             {"id": 78, "user": "impl-bot", "body": f"/devflow approve reviews {head[:12]}"}))
         r = s.run(review_mode="model")
@@ -1194,6 +1199,71 @@ def controls_implement():
         check("once the task records the answer, devflow prepares again on its branch and implements",
               (r3["act"].get("do"), r3["deliver"].get("delivered"), R(s.db)["commits"][branch_of(s.db)]["parents"]),
               ("prepare", "yes", [before]))
+    finally:
+        s.close()
+
+    def needs_research(stage, ws):
+        write(ws, ".devflow/tasks/T-0054.yaml", build.TRACE)
+        write(ws, ".devflow/tasks/T-0054.research.md", "- which unit vsftpd installs on el8: open\n")
+        report(ws, "prepare", {"proceed": False, "summary": "needs a fact", "decisions": [], "gaps": [],
+                               "research": [{"question": "which unit does vsftpd install on el8?",
+                                             "why": "U-54: the active condition"}]})
+        return True
+
+    def merged_record(text):
+        def put(db):
+            R(db)["commits"][R(db)["branches"][build.CANONICAL]]["files"]["docs/research/r-ftp.md"] = text
+        return put
+
+    s = Sim(impl_db())
+    try:
+        r = s.run_pass(needs_research)
+        check("preparation that needs a fact no record establishes: the item waits for research, with no verdict",
+              (verdict(r), phase(r), r["state"]["wait"]["reason"], r["state"]["wait"]["owner"]),
+              (None, "prepare", "research", "research lane"))
+        check("the question gets an ID a research record answers by, and the wait names it",
+              ([q["id"] for q in r["state"]["history"]["prepare_hold"]["research"]], "Q-T-0054-1" in r["state"]["wait"]["need"]),
+              (["Q-T-0054-1"], True))
+        s.edit(lambda db: set_runs(db, branch_of(db), build.check_runs()))
+        r2 = s.run_pass(good_model)
+        check("a later pass keeps waiting on that question; nothing is acted on",
+              (verdict(r2), r2["state"]["wait"]["reason"], r2["act"].get("do")), (None, "research", "none"))
+        s.edit(merged_record("# FTP\nanswers: Q-T-0054-2\n"))
+        r3 = s.run_pass(good_model)
+        check("a merged record answering another question releases nothing", r3["state"]["wait"]["reason"], "research")
+        s.edit(merged_record("# FTP\nanswers: Q-T-0054-1\n\n- vsftpd.service (source ...)\n"))
+        before = branch_of(s.db)
+        r4 = s.run_pass(good_model)
+        check("once a merged record answers it, the item is prepared again on its branch — not implemented straight away",
+              (r4["act"].get("do"), r4["deliver"].get("delivered"), R(s.db)["commits"][branch_of(s.db)]["parents"]),
+              ("prepare", "yes", [before]))
+    finally:
+        s.close()
+
+    s = Sim(impl_db())
+    try:
+        s.run_pass(needs_research)
+        s.edit(merged_record("# FTP\nunanswered: Q-T-0054-1\n"))
+        r = s.run_pass(good_model)
+        check("research closed without the answer the item needs: a person's decision, and the item still waits",
+              (verdict(r), r["state"]["wait"]["reason"], any("research closed without an answer to Q-T-0054-1" in b
+                                                            for b in r["state"]["blockers"]), r["act"].get("do")),
+              ("NEEDS_DECISION", "decision", True, "none"))
+    finally:
+        s.close()
+
+    s = Sim(impl_db(task_type="research"))
+    try:
+        s.run_pass(research_model)
+        s.edit(lambda db: set_runs(db, branch_of(db), build.check_runs()))
+        r = s.run_pass(research_model)
+        check("a research record whose task is unchanged is not rewritten", r["act"].get("do"), "none")
+        s.edit(lambda db: set_task(db, goal="FTP daemons on the target distributions (facts only)"))
+        before = branch_of(s.db)
+        r2 = s.run_pass(lambda st, ws: research_model(st, ws, {"docs/research/t-0054.md": "# FTP daemons (facts only)\n"}))
+        check("the task block changed: the record is rewritten for it, on its branch",
+              (r2["act"].get("do"), r2["deliver"].get("delivered"), R(s.db)["commits"][branch_of(s.db)]["parents"]),
+              ("research", "yes", [before]))
     finally:
         s.close()
 

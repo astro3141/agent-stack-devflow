@@ -163,6 +163,19 @@ class GitHubRemote:
         import base64
         return base64.b64decode(got["content"]).decode("utf-8")
 
+    def list_dir(self, ref, path, depth=2):
+        """The file paths under a directory at a ref, `depth` levels deep; [] when it is not there."""
+        got = self._call("GET", f"/contents/{urllib.parse.quote(path.rstrip('/'))}?ref={ref}", ok404=True)
+        if not isinstance(got, list):
+            return []
+        out = []
+        for e in got:
+            if e.get("type") == "file":
+                out.append(e["path"])
+            elif e.get("type") == "dir" and depth > 1:
+                out += self.list_dir(ref, e["path"], depth - 1)
+        return sorted(out)
+
     def blob_id(self, ref, path):
         got = self._call("GET", f"/contents/{urllib.parse.quote(path)}?ref={ref}", ok404=True)
         return (got or {}).get("sha")
@@ -449,6 +462,12 @@ class FixtureRemote:
         self._up()
         sha = self.r["branches"].get(ref, ref)
         return self._files(sha).get(path)
+
+    def list_dir(self, ref, path, depth=2):
+        self._up()
+        sha = self.r["branches"].get(ref, ref)
+        pre = path.rstrip("/") + "/"
+        return sorted(p for p in self._files(sha) if p.startswith(pre) and p[len(pre):].count("/") < depth)
 
     def blob_id(self, ref, path):
         import hashlib

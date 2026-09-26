@@ -101,7 +101,7 @@ def main(argv):
            "shared": ev.get("shared"), "finalize": ev.get("finalize"), "history": ev.get("history") or {},
            "tool": ev.get("tool"), "end_point": ev.get("end_point"),
            "violations": ev.get("violations"), "flow": ev.get("flow"), "prepare_only": ev.get("prepare_only"),
-           "rework_granted": ev.get("rework_granted")}
+           "rework_granted": ev.get("rework_granted"), "reviews_budget_spent": ev.get("reviews_budget_spent")}
     st = dfcore.adjudicate(ctx)
 
     hist = dict(ev.get("history") or {})
@@ -112,7 +112,9 @@ def main(argv):
         if ev.get("review_grant"):
             # the granted round is spent by running, whatever it concluded
             hist["review_grants_spent"] = list(hist.get("review_grants_spent") or []) + [str(head or "")[:12]]
-    if st["verdict"] == "REQUEST_CHANGES":
+    if st["verdict"] == "REQUEST_CHANGES" and (st.get("wait") or {}).get("reason") != "budget":
+        # counted when the change goes back for rework; a head that only met the limit is not a
+        # round (it is counted when a grant sends it back)
         if hist.get("last_rc_head") != head:
             hist["rework"] = int(hist.get("rework") or 0) + 1
             hist["last_rc_head"] = head

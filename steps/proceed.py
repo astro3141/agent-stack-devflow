@@ -28,11 +28,11 @@ def main(argv):
     except (OSError, ValueError) as e:
         print(json.dumps({"proceed": "no", "why": f"prepare.json is not readable: {type(e).__name__}"}))
         return 0
-    open_items = len(doc.get("decisions") or []) + len(doc.get("gaps") or [])
+    open_items = len(doc.get("decisions") or []) + len(doc.get("gaps") or []) + len(doc.get("research") or [])
     ok = doc.get("proceed") is True and not open_items
     print(json.dumps({"proceed": "yes" if ok else "no",
                       "why": "preparation settled the task" if ok else
-                      f"preparation leaves {open_items} question(s) for a person"}, ensure_ascii=False))
+                      f"preparation leaves {open_items} question(s) open (decisions, gaps or research)"}, ensure_ascii=False))
     return 0
 
 
