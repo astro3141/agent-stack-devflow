@@ -995,6 +995,7 @@ def impl_db(by="agent", max_rounds=3, task_type=None):
     edit_policy(db, pol, head_too=False)
     r = R(db)
     r["commits"][r["branches"][build.CANONICAL]]["files"]["tools/gen.py"] = GEN_PY
+    r["commits"][r["branches"][build.CANONICAL]]["files"]["fixtures/el8/cmd/svc_list.stdout"] = "named.service loaded\n"
     r["pulls"], r["reviews"] = {}, {}
     r["commits"]["ref0"] = {"parents": [], "author": "someone", "files": {"corpus/a.sh": "ps -ef | grep vsftpd\n"}}
     r["branches"]["reference/legacy"] = "ref0"
@@ -1007,7 +1008,8 @@ def impl_db(by="agent", max_rounds=3, task_type=None):
 def research_model(stage, ws, extra=None, report_it=True):
     """What the research lane writes: one record, and its report."""
     write(ws, "docs/research/t-0054.md", "# FTP daemons on the target distributions\n\n- vsftpd ... (source: packages.ubuntu.com, 2026-09-25, primary)\n"
-                                         "- the generator copies the source Plan (tools/gen.py:5) into collection-plan.tsv; nothing reads docs/nowhere.py or nowhere.tsv\n")
+                                         "- the generator copies the source Plan (tools/gen.py:5) into collection-plan.tsv; nothing reads docs/nowhere.py or nowhere.tsv\n"
+                                         "- the capture fixtures/el8/cmd/svc_list.stdout lists named.service (docs.redhat.com, read 2026-09-26)\n")
     for path, text in (extra or {}).items():
         write(ws, path, text)
     if report_it:
@@ -1259,7 +1261,7 @@ def controls_implement():
         ev2 = json.load(open(os.path.join(r2["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
         check("its review carries the research-record lens", "research-record" in (ev2.get("reviews") or {}).get("required", []), True)
         check("a repository file the record cites, in a directory or at the root, is in the reviewer's materials (and a path that is not there is not)",
-              sorted(os.path.basename(c) for c in (ev2.get("materials") or {}).get("cited", [])), ["collection-plan.tsv.txt", "tools__gen.py.txt"])
+              sorted(os.path.basename(c) for c in (ev2.get("materials") or {}).get("cited", [])), ["collection-plan.tsv.txt", "fixtures__el8__cmd__svc_list.stdout.txt", "tools__gen.py.txt"])
         check("a research record's review is the research lane's: its own reviewer, with its author's inputs",
               (r2["evaluate"].get("lane"), (ev2.get("materials") or {}).get("reference")), ("research", ["reference/legacy/"]))
         prompt = open(next(a["prompt"] for a in ev2["assignments"] if a.get("prompt")), encoding="utf-8").read()

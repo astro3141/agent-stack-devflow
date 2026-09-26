@@ -75,5 +75,6 @@ Write exactly one file, `{OUT}`, in the run's workspace (use the file tool), con
 }
 ```
 
-`materials` lists each material kind you read (`diff`, `task`, `trace`, `criteria`, `contracts`, `cited`, `reference`,
-`artifact_ops`) with `read: true` only if you actually read it.
+`materials` lists each material kind you read (`diff`, `task`, `checks`, `trace`, `criteria`, `contracts`, `cited`,
+`reference`, `artifact_ops`) with `read: true` only if you actually read it — every kind a lens's `read:` names
+must appear, or that lens is incomplete.

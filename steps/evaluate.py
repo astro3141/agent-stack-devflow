@@ -586,8 +586,10 @@ def write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev):
 
 # a path with or without directories: a file at the repository root is cited as `collection-plan.tsv`
 # (measured: both reviewers of a record left its claim about that file unverified, because it was
-# the one cited file this pattern required a directory for). Existence at the head filters the rest.
-CITE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*[\w-][\w.-]*\.(?:py|sh|yaml|yml|tsv|json|md|txt))(?::\d+)?")
+# the one cited file this pattern required a directory for). A path with directories may have any
+# extension (a record cites fixture captures such as `cmd/svc_systemctl_list.stdout`); a bare name
+# only a source or data extension, so host names are not looked up. Existence at the head filters the rest.
+CITE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w-][\w.-]*\.[A-Za-z0-9]+|[\w-][\w.-]*\.(?:py|sh|yaml|yml|tsv|json|md|txt))(?::\d+)?(?![\w/-])")
 
 
 def cited_paths(rem, pr, changed, limit=20):
@@ -604,7 +606,7 @@ def cited_paths(rem, pr, changed, limit=20):
             if ref in changed or ref in out or ref.startswith(("http", "www.")):
                 continue
             out.append(ref)
-    return [r for r in out if rem.file_at(pr["head_sha"], r) is not None][:limit]
+    return [r for r in out[:limit * 3] if rem.file_at(pr["head_sha"], r) is not None][:limit]
 
 
 def write_prompt(a, chosen, frame, ev):
