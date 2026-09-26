@@ -582,11 +582,14 @@ def write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev):
     ev["materials"] = index
 
 
-CITE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.(?:py|sh|yaml|yml|tsv|json|md|txt))(?::\d+)?")
+# a path with or without directories: a file at the repository root is cited as `collection-plan.tsv`
+# (measured: both reviewers of a record left its claim about that file unverified, because it was
+# the one cited file this pattern required a directory for). Existence at the head filters the rest.
+CITE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)*[\w-][\w.-]*\.(?:py|sh|yaml|yml|tsv|json|md|txt))(?::\d+)?")
 
 
 def cited_paths(rem, pr, changed, limit=20):
-    """Repository paths the changed documents mention (`dir/file.ext`, optionally `:line`), that
+    """Repository paths the changed documents mention (`dir/file.ext` or a root `file.ext`, optionally `:line`), that
     exist at the head and are not themselves part of the change — at most `limit`, in order of first
     mention."""
     out = []

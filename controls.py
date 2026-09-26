@@ -1002,7 +1002,7 @@ def impl_db(by="agent", max_rounds=3, task_type=None):
 def research_model(stage, ws, extra=None, report_it=True):
     """What the research lane writes: one record, and its report."""
     write(ws, "docs/research/t-0054.md", "# FTP daemons on the target distributions\n\n- vsftpd ... (source: packages.ubuntu.com, 2026-09-25, primary)\n"
-                                         "- the generator copies the source Plan (tools/gen.py:5); nothing reads docs/nowhere.py\n")
+                                         "- the generator copies the source Plan (tools/gen.py:5) into collection-plan.tsv; nothing reads docs/nowhere.py or nowhere.tsv\n")
     for path, text in (extra or {}).items():
         write(ws, path, text)
     if report_it:
@@ -1253,8 +1253,8 @@ def controls_implement():
         r2 = s.run_pass(research_model, review_mode="model")
         ev2 = json.load(open(os.path.join(r2["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
         check("its review carries the research-record lens", "research-record" in (ev2.get("reviews") or {}).get("required", []), True)
-        check("a repository file the record cites is in the reviewer's materials (and a path that is not there is not)",
-              [os.path.basename(c) for c in (ev2.get("materials") or {}).get("cited", [])], ["tools__gen.py.txt"])
+        check("a repository file the record cites, in a directory or at the root, is in the reviewer's materials (and a path that is not there is not)",
+              sorted(os.path.basename(c) for c in (ev2.get("materials") or {}).get("cited", [])), ["collection-plan.tsv.txt", "tools__gen.py.txt"])
         check("a research record's review is the research lane's: its own reviewer, with its author's inputs",
               (r2["evaluate"].get("lane"), (ev2.get("materials") or {}).get("reference")), ("research", ["reference/legacy/"]))
         prompt = open(next(a["prompt"] for a in ev2["assignments"] if a.get("prompt")), encoding="utf-8").read()
