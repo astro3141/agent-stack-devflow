@@ -1,6 +1,6 @@
 """devflow step: reach the task's state from this run's evidence.
 
-usage: adjudicate.py [<receipt>]
+usage: adjudicate.py [<receipt>] [<why no model review was started>]
 
 Reads <ws>/devflow/evaluation.json (this run's, from evaluate.py) and, when model reviews ran in
 this run, the fan-out receipt steps/tasks.py wrote. Writes <ws>/devflow/state.json.
@@ -104,6 +104,11 @@ def main(argv):
            "rework_granted": ev.get("rework_granted"), "reviews_budget_spent": ev.get("reviews_budget_spent"),
            "lane": ev.get("lane")}
     st = dfcore.adjudicate(ctx)
+    held = argv[1].strip() if len(argv) > 1 and argv[1] else ""
+    if held and not calls:
+        # the round was not started: the router's own words say why (a provider over its limit,
+        # a login expired), so the person reading the issue knows what is being waited for
+        st["notes"] = list(st.get("notes") or []) + [f"model reviews not started this run: {held}"[:400]]
 
     hist = dict(ev.get("history") or {})
     head = (ev.get("frame") or {}).get("head_sha")

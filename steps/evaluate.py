@@ -169,6 +169,9 @@ def main(argv):
         emit(status="TOOL_FAILURE" if ev["tool"] else "OK", evaluation=os.path.join(D, "evaluation.json"),
              lane=ev.get("lane") or "change",
              need_models="yes" if need and not ev["tool"] else "no", assignments=len(need),
+             # the model families this round needs all of (a lens that must be completed by
+             # several): the workflow asks whether every one is usable before starting any
+             models=",".join(sorted({a["provider"] for a in need if a.get("provider")})),
              merged="yes" if (ev.get("pr") or {}).get("merged") else "no",
              frame=(ev.get("frame") or {}).get("id", ""), head=str((ev.get("frame") or {}).get("head_sha") or ""),
              error="; ".join(ev["tool"])[:300])
@@ -701,5 +704,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
     except Exception as e:           # a step answers in JSON, it does not raise (docs/packages.md)
-        emit(status="TOOL_FAILURE", evaluation="", need_models="no", assignments=0, merged="no",
+        emit(status="TOOL_FAILURE", evaluation="", need_models="no", assignments=0, models="", merged="no",
              frame="", head="", error=f"{type(e).__name__}: {e}"[:300])

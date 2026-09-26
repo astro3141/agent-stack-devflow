@@ -86,6 +86,7 @@ agents:
       evaluation: {type: string}
       need_models: {type: string}
       assignments: {type: number}
+      models: {type: string}
       merged: {type: string}
       frame: {type: string}
       head: {type: string}
@@ -114,8 +115,28 @@ agents:
       profile: {type: string}
       evidence_dir: {type: string}
     routes:
+      - to: admit
+        when: "{{ route.output.decision == 'ROUTE' and ',' in evaluate.output.models }}"
       - to: review_plan
         when: "{{ route.output.decision == 'ROUTE' }}"
+      - to: adjudicate
+
+  - name: admit
+    type: script
+    description: A round several model families must all complete starts only when every one is usable
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    # route.py picks one provider from the profile; a round needing claude and codex both asks
+    # about both (stack admit_models.py, which reports and decides nothing — holding is ours)
+    args: ["/work/stack/steps/admit_models.py", "{{ route.output.profile }}", "{{ evaluate.output.models }}"]
+    output:
+      all_eligible: {type: boolean}
+      eligible: {type: array}
+      missing: {type: array}
+      reason: {type: string}
+      evaluated: {type: string}
+    routes:
+      - to: review_plan
+        when: "{{ admit.output.all_eligible }}"
       - to: adjudicate
 
   - name: review_plan
@@ -157,7 +178,8 @@ agents:
     description: The task's phase, progress, execution status, review status and verdict — deterministic
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/adjudicate.py",
-           "{% if reviews is defined %}{{ reviews.output.receipt }}{% endif %}"]
+           "{% if reviews is defined %}{{ reviews.output.receipt }}{% endif %}",
+           "{% if reviews is not defined and admit is defined and not admit.output.all_eligible %}{{ admit.output.reason }}{% elif reviews is not defined and route is defined and route.output.decision != 'ROUTE' %}{{ route.output.reason }}{% endif %}"]
     output:
       status: {type: string}
       verdict: {type: string}

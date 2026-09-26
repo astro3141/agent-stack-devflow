@@ -1337,6 +1337,19 @@ def controls_implement():
         prompt = open(next(a["prompt"] for a in ev2["assignments"] if a.get("prompt")), encoding="utf-8").read()
         check("and it is told the hosts it may fetch from — the researcher's",
               ("packages.ubuntu.com" in prompt and "{WEB}" not in prompt), True)
+        check("the round names the model families it needs all of",
+              r2["evaluate"].get("models"), "claude,codex")
+        wf = yaml.safe_load(open(os.path.join(PKG, "devflow.yaml"), encoding="utf-8"))
+        steps_by = {a["name"]: a for a in wf["agents"]}
+        check("and the workflow asks whether every one is usable before starting any (the stack's admit_models.py)",
+              (steps_by["route"]["routes"][0]["to"], "evaluate.output.models" in steps_by["route"]["routes"][0]["when"],
+               steps_by["admit"]["args"][0], [r["to"] for r in steps_by["admit"]["routes"]]),
+              ("admit", True, "/work/stack/steps/admit_models.py", ["review_plan", "adjudicate"]))
+        env_h = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(r2["ws"])}
+        step("adjudicate.py", ["", "claude: exhausted: session 91% >= 80%"], env_h)
+        held = json.load(open(os.path.join(r2["ws"], "devflow", "state.json"), encoding="utf-8"))
+        check("a round held for a provider says so on the issue, in the router's words",
+              any("not started this run: claude: exhausted" in n for n in held.get("notes") or []), True)
         check("two models review it, both as the research reviewer (brokered, every vendor runs as a role) — labels inside the review_r write rule",
               sorted((a["reviewer"], a.get("provider"), a.get("principal")) for a in ev2["assignments"]),
               [("r1-claude", "claude", "devflow-research-reviewer"), ("r2-codex", "codex", "devflow-research-reviewer")])
