@@ -1228,9 +1228,9 @@ def controls_implement():
         prompt = open(next(a["prompt"] for a in ev2["assignments"] if a.get("prompt")), encoding="utf-8").read()
         check("and it is told the hosts it may fetch from — the researcher's",
               ("packages.ubuntu.com" in prompt and "{WEB}" not in prompt), True)
-        check("two models review it: claude as the research reviewer, codex as the ordinary reviewer — labels inside the review_r write rule",
+        check("two models review it, both as the research reviewer (brokered, every vendor runs as a role) — labels inside the review_r write rule",
               sorted((a["reviewer"], a.get("provider"), a.get("principal")) for a in ev2["assignments"]),
-              [("r1-claude", "claude", "devflow-research-reviewer"), ("r2-codex", "codex", "")])
+              [("r1-claude", "claude", "devflow-research-reviewer"), ("r2-codex", "codex", "devflow-research-reviewer")])
         plan = json.load(open(os.path.join(r2["ws"], "devflow", "review_plan.json"), encoding="utf-8")) \
             if os.path.isfile(os.path.join(r2["ws"], "devflow", "review_plan.json")) else None
         env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(r2["ws"])}
@@ -1238,7 +1238,7 @@ def controls_implement():
         plan = json.load(open(os.path.join(r2["ws"], "devflow", "review_plan.json"), encoding="utf-8"))
         check("and each runs on its own model, with its own login and principal",
               sorted((m["steps"][0]["provider"], m["steps"][0]["login"], m["steps"][0]["principal"]) for m in plan["members"]),
-              [("claude", "claude", "devflow-research-reviewer"), ("codex", "codex", "devflow-reviewer")])
+              [("claude", "claude", "devflow-research-reviewer"), ("codex", "codex", "devflow-research-reviewer")])
 
         def one_person_review(db):
             h = branch_of(db)

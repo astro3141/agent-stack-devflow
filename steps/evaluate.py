@@ -379,8 +379,8 @@ def main(argv):
     if need_models > 1:
         # a lens is complete only when that many different models completed it: one assignment per
         # model, each carrying the lenses (its own reviewer label, provider and principal). On the
-        # research lane the claude reviewer is the research reviewer, with the author's hosts; a
-        # model that cannot run as a role (agent-stack §48) reviews as the ordinary reviewer.
+        # research lane every model reviews as the research reviewer, in its profile with the
+        # author's hosts: brokered, every vendor runs as a role (agent-stack §55).
         models = list(rv.get("models") or ["claude", "codex"])[:need_models]
         # the reviewer's label names the review file (review_<label>.json), and every reviewer
         # principal's write rule allows exactly the review_r prefix — a label that drops the r
@@ -388,7 +388,7 @@ def main(argv):
         # against nine fetched primary pages, DENIED at the write)
         assignments = [{"reviewer": f"r{i}-{m}", "lenses": sorted(chosen), "independent": False,
                         "provider": m,
-                        "principal": dfcore.RESEARCH_REVIEWER if (m == "claude" and ev.get("lane") == "research") else ""}
+                        "principal": dfcore.RESEARCH_REVIEWER if ev.get("lane") == "research" else ""}
                        for i, m in enumerate(models, 1)]
     indep_lenses = sorted({l for a in assignments if a["independent"] for l in a["lenses"]})
     independent_needed = bool(indep_lenses)
@@ -602,7 +602,7 @@ def write_prompt(a, chosen, frame, ev):
                .replace("{POLICY}", frame["policy"]["digest"])
                .replace("{BASIS}", frame["basis"])
                .replace("{WEB}", refs.web_hosts(dfcore.RESEARCH_REVIEWER, PKG)
-                        if (ev.get("lane") == "research" and a.get("principal") == dfcore.RESEARCH_REVIEWER)
+                        if a.get("principal") == dfcore.RESEARCH_REVIEWER
                         else "none — this review has no page fetching; search results, where your tools have them, are secondary sources")
                .replace("{MATERIALS}", os.path.join(D, "materials"))
                .replace("{OUT}", os.path.join(WS, f"review_{a['reviewer']}.json")))

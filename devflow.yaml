@@ -25,7 +25,10 @@
 # directory and nothing else. It is reviewed and merged like any change; item tasks then build on
 # the merged records, and their implementer (profile `closed`: the providers only) fetches nothing.
 # Every devflow model step is brokered: its role's profile decides its network, and the broker
-# holds the credential.
+# holds the credential. The three steps below call broker_dispatch.py themselves (agent_task.py's
+# argv, the other door): the stack swaps the door only inside tasks.py and task_chain.py, and a
+# workflow step that names agent_task.py directly ran in the main agent on the shared list —
+# measured: the researcher's rework call, outside its profile, on the list that holds GitHub open.
 #
 # Every edge is decided deterministically from a step's output (no model chooses a route).
 workflow:
@@ -236,7 +239,7 @@ agents:
     type: script
     description: 리서치 레인 — a research or survey record, as devflow-researcher (its own hosts, agent-stack §48)
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
+    args: ["/work/stack/steps/broker_dispatch.py", "{{ route_impl.output.provider }}",
            "{{ route_impl.output.model_route }}", "research", "{{ work.output.prompt_research }}",
            "devflow/research.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
            "devflow-researcher"]
@@ -254,7 +257,7 @@ agents:
     type: script
     description: 준비 — the criteria mapping and trace, from the research records, as devflow-implementer
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
+    args: ["/work/stack/steps/broker_dispatch.py", "{{ route_impl.output.provider }}",
            "{{ route_impl.output.model_route }}", "prepare", "{{ work.output.prompt_prepare }}",
            "devflow/prepare.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
            "devflow-implementer"]
@@ -285,7 +288,7 @@ agents:
     type: script
     description: 구현 — the change and its tests, as devflow-implementer
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
+    args: ["/work/stack/steps/broker_dispatch.py", "{{ route_impl.output.provider }}",
            "{{ route_impl.output.model_route }}", "implement", "{{ work.output.prompt_implement }}",
            "devflow/implement.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
            "devflow-implementer"]
