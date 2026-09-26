@@ -743,6 +743,11 @@ def controls_evidence():
              f'"review_grants_spent":["{head[:12]}"]}}}} -->'}))
         r = s.run(review_mode="model")
         check("once that round ran, the grant is spent: the budget holds again", r["evaluate"].get("need_models"), "no")
+        s.edit(lambda db: R(db)["issues"]["3"]["comments"].append(
+            {"id": 81, "user": "astro3141", "body": f"/devflow approve reviews {head[:12]}"}))
+        r = s.run(review_mode="model")
+        check("another comment for the same head is another round (its reviews had to be taken again)",
+              r["evaluate"].get("need_models"), "yes")
     finally:
         s.close()
 

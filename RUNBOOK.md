@@ -80,7 +80,7 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 | `/devflow approve <gate> <task digest>` | a gate bound to the task (e.g. `gate1`, `criterion`) |
 | `/devflow approve <gate> <head sha>` | a gate bound to a head (e.g. `gate2`) |
 | `/devflow approve rework <head sha>` | one more automatic rework round for that head, beyond `loop.max_rework` (and `implement.max_rounds`); spent by that round |
-| `/devflow approve reviews <head sha>` | one more round of model review for that head, past `reviews.budget.model_calls` and `reviews.max_rounds`; spent by the round it pays for |
+| `/devflow approve reviews <head sha>` | one more round of model review for that head, past `reviews.budget.model_calls` and `reviews.max_rounds`; spent by the round it pays for — each comment is one round (post another when a new devflow or policy version asks for the head's reviews again) |
 | `/devflow except <check> <head sha> <reason and alternative evidence>` | a required check that could not run counts, for that head only; never a FAIL |
 
 ## 7. Limits that stop automatic work

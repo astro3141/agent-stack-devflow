@@ -233,10 +233,12 @@ def main(argv):
     ev["rework_granted"] = len(grants)
     # one more round of model review for one head, past the budget and the round limit
     # (`/devflow approve reviews <head sha>`) — the limits are defaults, and spending past them is a
-    # person's decision; a grant is spent by the round it paid for (adjudicate records it)
+    # person's decision; a grant is spent by the round it paid for (adjudicate records it). Each
+    # comment is one round: a head whose reviews had to be taken again (the workflow or the policy
+    # changed, so the frame did) gets another round by another comment, never by the old one.
     head12 = str((pr or {}).get("head_sha") or "")[:12]
-    ev["review_grant"] = bool(head12) and head12 not in (ev["history"].get("review_grants_spent") or []) \
-        and any(a["gate"] == "reviews" and a["counted"] and a["value"][:12] == head12 for a in given)
+    granted = sum(1 for a in given if a["gate"] == "reviews" and a["counted"] and a["value"][:12] == head12)
+    ev["review_grant"] = bool(head12) and granted > (ev["history"].get("review_grants_spent") or []).count(head12)
     ev["end_point"] = str(task.get("end_point") or (pol.get("defaults") or {}).get("end_point") or "integration")
     loop = pol.get("loop") or {}
     ev["history"]["max_no_progress"] = int(loop.get("max_no_progress") or 3)
