@@ -1260,6 +1260,9 @@ def controls_implement():
         r2 = s.run_pass(good_model)
         check("green checks on that head change nothing: preparation is not an implementation",
               (verdict(r2), phase(r2), r2["act"].get("do")), ("NEEDS_DECISION", "prepare", "none"))
+        r2m = s.run_pass(good_model, review_mode="model")
+        check("and no model is asked to review it as one (measured on #19: four reviewers were)",
+              r2m["evaluate"].get("need_models"), "no")
         s.edit(lambda db: set_task(db, decisions=["FTPS: not observable; REVIEW (astro3141, 2026-09-25)"]))
         before = branch_of(s.db)
         r3 = s.run_pass(good_model)

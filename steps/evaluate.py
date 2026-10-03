@@ -518,6 +518,14 @@ def main(argv):
             if a["by"] == "model":
                 a["by"] = "deferred"
                 a["why"] = "waiting for this head's checks to complete without a failure"
+    # A head that holds only devflow's preparation (waiting for a decision, a gap or research) is
+    # not an implementation: reviewing it as one spends model calls on nothing to judge. Measured:
+    # #19's preparation head, once its CI had finished, was sent to four implementation reviewers.
+    if ev.get("prepare_only"):
+        for a in assignments:
+            if a["by"] == "model":
+                a["by"] = "deferred"
+                a["why"] = "the head holds only preparation; it is reviewed once it is implemented"
     model_needed = [a for a in assignments if a["by"] == "model"]
     grant = bool(ev.get("review_grant"))
     if used + len(model_needed) > int(budget.get("model_calls") or 6) and not grant:
