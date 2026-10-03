@@ -847,10 +847,22 @@ def render_state(state):
     return "\n".join(lines) + f"\n\n{STATE_MARK} {canon(machine)} -->"
 
 
-def read_state(comments):
-    """The last published state on the thread, or {}. History, not authority: every verdict is
-    recomputed from evidence; only counters (rounds, budget) and completed-operation keys carry."""
-    for c in reversed(comments):
+def own_comments(comments, writer):
+    """The comments devflow wrote: by the account its token writes as, through the same App (or
+    through none, for a personal token). A comment carrying devflow's marker from anyone else — or
+    from the same person by hand — is not devflow's, whatever it says: the counters it carries
+    (budgets, rounds, reworks, the commits devflow pushed) and its done-keys would otherwise be
+    whatever a commenter wrote (agent-stack docs/packages.md: a reading nobody authenticated is not
+    a reading; measured in devflow's own controls, agent-stack#14)."""
+    return [c for c in comments
+            if c.get("user") == writer.get("login") and (c.get("app") or "") == (writer.get("app") or "")]
+
+
+def read_state(comments, writer):
+    """The last state devflow itself published on the thread, or {}. History, not authority: every
+    verdict is recomputed from evidence; only counters (rounds, budget) and completed-operation keys
+    carry — so only devflow's own comment may carry them (own_comments)."""
+    for c in reversed(own_comments(comments, writer)):
         m = STATE_RE.search(c.get("body") or "")
         if m:
             try:

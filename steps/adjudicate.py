@@ -104,6 +104,10 @@ def main(argv):
            "rework_granted": ev.get("rework_granted"), "reviews_budget_spent": ev.get("reviews_budget_spent"),
            "lane": ev.get("lane")}
     st = dfcore.adjudicate(ctx)
+    if ev.get("notes"):
+        # what evaluate noticed about the inputs (rules edited by the change, marker comments it
+        # did not trust) is said on the issue too
+        st["notes"] = list(ev["notes"]) + list(st.get("notes") or [])
     held = argv[1].strip() if len(argv) > 1 and argv[1] else ""
     if held and not calls:
         # the round was not started: the router's own words say why (a provider over its limit,

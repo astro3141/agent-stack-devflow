@@ -75,6 +75,12 @@ def from_grant(got, client_id, now=None):
     return doc
 
 
+def through_app():
+    """Whether the token devflow uses is the App login's (a user-to-server token: what it writes is
+    marked as performed via the App) rather than an operator's personal token."""
+    return os.path.isfile(os.path.join(login_dir(), TOKEN_FILE))
+
+
 def token(proxy_env=None, now=None, post=None):
     """A usable token, or AuthError naming what the operator can do."""
     now = now or time.time()

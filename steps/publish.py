@@ -57,7 +57,10 @@ def main(argv):
         st["ops"]["publish"] = pub_key
         body = dfcore.render_state(st)
         comments = rem.comments(issue)
-        mine = [c for c in comments if dfcore.STATE_MARK in (c.get("body") or "")]
+        writer = rem.writer()
+        # only devflow's own marker comment is edited, or counts as "already written": a copy
+        # someone else posted is neither devflow's state nor proof that devflow published
+        mine = [c for c in dfcore.own_comments(comments, writer) if dfcore.STATE_MARK in (c.get("body") or "")]
         if any(f'"publish":"{pub_key}"' in (c.get("body") or "") for c in mine):
             skipped.append("state comment already says this")
         elif mine:
@@ -68,7 +71,8 @@ def main(argv):
                 cid = rem.add_comment(issue, body)
                 did.append(f"state comment {cid} added")
             except remote_mod.RemoteError:
-                again = [c for c in rem.comments(issue) if f'"publish":"{pub_key}"' in (c.get("body") or "")]
+                again = [c for c in dfcore.own_comments(rem.comments(issue), writer)
+                         if f'"publish":"{pub_key}"' in (c.get("body") or "")]
                 if not again:
                     raise
                 skipped.append("state comment had been added; the answer was lost")

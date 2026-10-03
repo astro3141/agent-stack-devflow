@@ -186,11 +186,19 @@ def main(argv):
         canonical_head = rem.branch_head(reg["canonical_branch"])
         issue = rem.issue(issue_no)
         comments = rem.comments(issue_no)
+        # who devflow writes as: only its own marker comment carries its counters, and its own
+        # comments are never a person's approval (the App login acts as the person who connected it)
+        writer = rem.writer()
     except (dfcore.ConfigError, remote_mod.RemoteError) as e:
         ev["tool"].append(f"{type(e).__name__}: {e}" + (f" ({e.hint})" if getattr(e, "hint", "") else ""))
         return done()
+    ev["writer"] = writer
+    mine = {c["id"] for c in dfcore.own_comments(comments, writer)}
+    ignored = [c["id"] for c in comments if c["id"] not in mine and dfcore.STATE_MARK in (c.get("body") or "")]
+    if ignored:
+        ev.setdefault("notes", []).append(f"marker comment(s) not written by devflow ignored: {ignored[:5]}")
 
-    prior = dfcore.read_state(comments)
+    prior = dfcore.read_state(comments, writer)
     ev["history"] = dict(prior.get("history") or {})
     ev["ops_done"] = dict(prior.get("ops") or {})
     ev["prior"] = {k: prior.get(k) for k in ("phase", "verdict", "frame")} if prior else {}
@@ -257,7 +265,7 @@ def main(argv):
 
     # Human gates the policy attaches to this change class, bound to the exact thing approved.
     gates = (pol.get("human_gates") or {}).get(cls.get("change_class"), [])
-    given, excepts = approvals(comments, pol, impl)
+    given, excepts = approvals([c for c in comments if c["id"] not in mine], pol, impl)
     ev["approvals"] = given + [dict(e, gate="except") for e in excepts]
     # one more automatic rework round, granted by a person for one head — the project's limit is
     # a default, and passing it is a decision (`/devflow approve rework <head sha>`); a grant for

@@ -46,13 +46,16 @@ class GitHubRemote:
 
     def __init__(self, repo, token=None, proxy_env=None):
         self.repo = repo
+        self.via_app = False
         if token is None:
             import ghauth
             try:
                 token = ghauth.token(proxy_env)
+                self.via_app = ghauth.through_app()
             except ghauth.AuthError as e:
                 raise RemoteError(f"{e} — {e.hint}" if e.hint else str(e))
         self.token = token
+        self._writer = None
         handlers = []
         if proxy_env:
             handlers.append(urllib.request.ProxyHandler(
@@ -201,8 +204,28 @@ class GitHubRemote:
                 for r in self._pages(f"/pulls/{int(number)}/reviews")]
 
     def comments(self, number):
-        return [{"id": c["id"], "body": c.get("body") or "", "user": (c.get("user") or {}).get("login", "")}
+        return [{"id": c["id"], "body": c.get("body") or "", "user": (c.get("user") or {}).get("login", ""),
+                 "app": (c.get("performed_via_github_app") or {}).get("slug", "")}
                 for c in self._pages(f"/issues/{int(number)}/comments")]
+
+    def writer(self):
+        """Who devflow writes as: the token's login, and — for the App login's token — the App its
+        writes are performed via. What devflow reads back as its own must carry both; a comment
+        anyone else wrote, or the same person wrote by hand, is not devflow's. Not knowing who
+        devflow is, is a tool failure, never "anyone"."""
+        if self._writer is None:
+            me = self._call("GET", f"{self.API}/user") or {}
+            app = ""
+            if self.via_app:
+                got = self._call("GET", f"{self.API}/user/installations") or {}
+                slugs = {i.get("app_slug") for i in got.get("installations") or [] if i.get("app_slug")}
+                if len(slugs) != 1:
+                    raise RemoteError(f"cannot tell which App this login writes through (installations: {sorted(slugs)})")
+                app = slugs.pop()
+            if not me.get("login"):
+                raise RemoteError("cannot tell which account this token writes as")
+            self._writer = {"login": me["login"], "app": app}
+        return dict(self._writer)
 
     def statuses(self, sha):
         return [{"context": s["context"], "state": s["state"], "description": s.get("description") or ""}
@@ -463,6 +486,12 @@ class FixtureRemote:
         sha = self.r["branches"].get(ref, ref)
         return self._files(sha).get(path)
 
+    WRITER = {"login": "devflow", "app": "devflow-app"}
+
+    def writer(self):
+        self._up()
+        return dict(self.r.get("writer") or self.WRITER)
+
     def list_dir(self, ref, path, depth=2):
         self._up()
         sha = self.r["branches"].get(ref, ref)
@@ -516,10 +545,11 @@ class FixtureRemote:
         self._lose("set_status")
 
     def add_comment(self, number, body):
+        w = self.writer()          # reads the store; take it before holding a thread of it
         self._up()
         t = self._thread(number)
         cid = int(time.time() * 1000) % 10**9 + len(t.setdefault("comments", []))
-        t["comments"].append({"id": cid, "body": body, "user": "devflow"})
+        t["comments"].append({"id": cid, "body": body, "user": w["login"], "app": w["app"]})
         self._save()
         self._lose("add_comment")
         return cid
