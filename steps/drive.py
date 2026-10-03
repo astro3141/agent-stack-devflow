@@ -23,17 +23,18 @@ import json, os, re, subprocess, sys, time
 
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
+import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
+
 RUNNER = ["/opt/venv/bin/python", "/work/stack/run_workflow.py"]
-PARENT = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
+PARENT = step.run_id()
 
 
 def settle(project, head, poll_s, budget_s, sleep=time.sleep):
     """Wait until the checks on `head` have settled: some exist, none is still running, and the set
     did not change between two looks (a workflow that starts late is still seen). Asked of GitHub
     directly — a pass is not spent on watching CI. Returns (settled?, seconds waited)."""
-    import dfcore, stackenv, remote as remote_mod
-    ws_root, proxy = stackenv.load()
-    rem = dfcore.open_remote(dfcore.registration(project), os.path.join(ws_root, PARENT), proxy)
+    import dfcore, remote as remote_mod
+    rem = dfcore.open_remote(dfcore.registration(project), dfcore.workspace(), dfcore.egress_env())
     waited, last = 0, None
     while waited <= budget_s:
         try:
@@ -52,8 +53,6 @@ def settle(project, head, poll_s, budget_s, sleep=time.sleep):
     return False, waited
 
 
-def emit(**kw):
-    print(json.dumps(kw, ensure_ascii=False))
 
 
 def one_pass(run_id, project, issue, profile, impl_profile, review_mode):
@@ -145,15 +144,12 @@ def main(argv):
     last = passes[-1] if passes else {}
     json.dump({"passes": passes, "stopped": why}, open(os.path.join(
         os.environ.get("TMPDIR", "/tmp"), f"devflow-auto-{PARENT}.json"), "w"), ensure_ascii=False, indent=1)
-    emit(status="OK" if last.get("ok") else "TOOL_FAILURE", passes=len(passes), stopped=why,
+    step.out(status="OK" if last.get("ok") else "TOOL_FAILURE", passes=len(passes), stopped=why,
          verdict=last.get("verdict") or "", phase=last.get("phase") or "", next=last.get("next") or "",
          last_run=last.get("run") or "", runs=" ".join(x.get("run", "") for x in passes))
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except Exception as e:
-        emit(status="TOOL_FAILURE", passes=0, stopped=f"{type(e).__name__}: {e}"[:300], verdict="", phase="",
-             next="", last_run="", runs="")
+    # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
+    sys.exit(step.main(lambda: main(sys.argv[1:]), passes=0, stopped="the step failed: see reason", verdict="", phase="", next="", last_run="", runs=""))

@@ -26,12 +26,12 @@ import json, os, sys
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
-import stackenv  # noqa: E402
+import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 import remote as remote_mod  # noqa: E402
 
-WS_ROOT, PROXY = stackenv.load()
-RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
-WS = os.path.join(WS_ROOT, RUN)
+RUN = step.run_id()
+WS = dfcore.workspace()
+PROXY = dfcore.egress_env()
 D = os.path.join(WS, "devflow")
 
 STATUS = {"PASS": "success", "REQUEST_CHANGES": "failure", "CONTRACT_GAP": "failure", "NEEDS_DECISION": "failure"}
@@ -41,7 +41,7 @@ def main(argv):
     project = argv[0]
     sp = os.path.join(D, "state.json")
     if not os.path.isfile(sp):
-        print(json.dumps({"status": "TOOL_FAILURE", "published": "no", "evidence_index": "", "error": "no state for this run"}))
+        step.out(**{"reason": "", "status": "TOOL_FAILURE", "published": "no", "evidence_index": "", "error": "no state for this run"})
         return 0
     st = json.load(open(sp, encoding="utf-8"))
     frame = st.get("frame") or {}
@@ -113,20 +113,17 @@ def main(argv):
               open(idx, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     json.dump(st, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     w = st.get("wait") or {}
-    print(json.dumps({"status": "TOOL_FAILURE" if err else "OK", "published": "no" if err else "yes",
+    step.out(**{"reason": "", "status": "TOOL_FAILURE" if err else "OK", "published": "no" if err else "yes",
                       "did": "; ".join(did), "skipped": "; ".join(skipped), "evidence_index": idx,
                       # the task's final state for this run, after integration had its say
                       "verdict": st.get("verdict") or "UNDECIDED", "phase": st["phase"],
                       "progress": st.get("progress") or "",
                       "next": f"{w.get('need', '')} (owner: {w.get('owner', '')})" if w else "",
                       "wait": w.get("reason", "") if w else "", "owner": w.get("owner", "") if w else "",
-                      "error": err}, ensure_ascii=False))
+                      "error": err})
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except Exception as e:
-        print(json.dumps({"status": "TOOL_FAILURE", "published": "no", "evidence_index": "", "wait": "", "owner": "",
-                          "error": f"{type(e).__name__}: {e}"[:300]}))
+    # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
+    sys.exit(step.main(lambda: main(sys.argv[1:]), published="no", evidence_index="", wait="", owner="", error=dfcore.CRASH))

@@ -24,11 +24,11 @@
 # profile carries web hosts (agent-stack §53–§55) — writing a record into the project's research
 # directory and nothing else. It is reviewed and merged like any change; item tasks then build on
 # the merged records, and their implementer (profile `closed`: the providers only) fetches nothing.
-# Every devflow model step is brokered: its role's profile decides its network, and the broker
-# holds the credential. The three steps below call broker_dispatch.py themselves (agent_task.py's
-# argv, the other door): the stack swaps the door only inside tasks.py and task_chain.py, and a
-# workflow step that names agent_task.py directly ran in the main agent on the shared list —
-# measured: the researcher's rework call, outside its profile, on the list that holds GitHub open.
+# Every devflow model step runs as a role whose egress profile decides its network. Where a call
+# runs is not the workflow's to choose: agent_task.py hands a principal with an egress_profile to
+# the broker itself (agent-stack docs/packages.md, one door). Until the stack did, these steps
+# named broker_dispatch.py — measured then: the researcher's rework call, through agent_task.py,
+# ran outside its profile on the list that holds GitHub open.
 #
 # Every edge is decided deterministically from a step's output (no model chooses a route).
 workflow:
@@ -82,6 +82,7 @@ agents:
            "{{ workflow.input.issue }}", "{{ workflow.input.fixture }}", "{{ workflow.input.review_mode }}"]
     timeout: 600
     output:
+      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       evaluation: {type: string}
       need_models: {type: string}
@@ -152,8 +153,10 @@ agents:
            "{% if route is defined %}{{ route.output.provider }}{% endif %}",
            "{% if route is defined %}{{ route.output.login }}{% endif %}",
            "{% if route is defined %}{{ route.output.model_route }}{% else %}direct{% endif %}",
-           "{% if evaluate.output.lane == 'research' %}devflow-research-reviewer{% else %}{{ workflow.input.reviewer }}{% endif %}"]
+           "{% if evaluate.output.lane == 'research' %}devflow-research-reviewer{% else %}{{ workflow.input.reviewer }}{% endif %}",
+           "{% if route is defined %}{{ route.output.profile }}{% else %}{{ admit.output.profile }}{% endif %}"]
     output:
+      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       plan: {type: string}
       members: {type: number}
@@ -209,6 +212,7 @@ agents:
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/act.py"]
     output:
+      reason: {type: string}             # empty, or why the step crashed (step.main)
       do: {type: string}
       why: {type: string}
       error: {type: string}
@@ -247,6 +251,7 @@ agents:
     args: ["/work/packages/devflow/steps/work.py", "{{ workflow.input.project }}", "{{ act.output.do }}"]
     timeout: 900
     output:
+      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       stage: {type: string}
       workspace: {type: string}
@@ -270,17 +275,39 @@ agents:
     type: script
     description: 리서치 레인 — a research or survey record, as devflow-researcher (its own hosts, agent-stack §48)
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/stack/steps/broker_dispatch.py", "{{ route_impl.output.provider }}",
+    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
            "{{ route_impl.output.model_route }}", "research", "{{ work.output.prompt_research }}",
            "devflow/research.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
            "devflow-researcher"]
     timeout: 3700
-    output:
-      status: {type: string}
-      produced: {type: boolean}
+    # the execution record agent_task.py answers with (agent-stack stack/execution.py, contract 1),
+    # copied from docs/packages.md "The output of a model step" — one copy, reused below
+    output: &agent_out
+      status: {type: string}                 # COMPLETED | FAILED | DENIED | TIMED_OUT | ...
       provider: {type: string}
+      principal: {type: string}
+      model_route: {type: string}
       run_id: {type: string}
+      workspace: {type: string}
+      produced_path: {type: string}
+      produced: {type: boolean}
+      produced_stale: {type: boolean}
+      model_session_reported: {type: string}
+      model_adapter_reported: {type: string}
+      model_served: {type: string}
+      approvals_requested: {type: number}
+      mcp_rule_denials: {type: number}
+      retryable_elsewhere: {type: boolean}
+      evidence_dir: {type: string}
+      profile: {type: string}
+      attempts: {type: number}
       failure: {type: string}
+      ledger_error: {type: string}
+      measurements:
+        type: object
+        properties:
+          total_tokens: {type: number, required: false}
+          wall_ms: {type: number, required: false}
     routes:
       - to: deliver
 
@@ -288,17 +315,12 @@ agents:
     type: script
     description: 준비 — the criteria mapping and trace, from the research records, as devflow-implementer
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/stack/steps/broker_dispatch.py", "{{ route_impl.output.provider }}",
+    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
            "{{ route_impl.output.model_route }}", "prepare", "{{ work.output.prompt_prepare }}",
            "devflow/prepare.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
            "devflow-implementer"]
     timeout: 3700
-    output:
-      status: {type: string}
-      produced: {type: boolean}
-      provider: {type: string}
-      run_id: {type: string}
-      failure: {type: string}
+    output: *agent_out
     routes:
       - to: proceed
 
@@ -319,17 +341,12 @@ agents:
     type: script
     description: 구현 — the change and its tests, as devflow-implementer
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/stack/steps/broker_dispatch.py", "{{ route_impl.output.provider }}",
+    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
            "{{ route_impl.output.model_route }}", "implement", "{{ work.output.prompt_implement }}",
            "devflow/implement.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
            "devflow-implementer"]
     timeout: 3700
-    output:
-      status: {type: string}
-      produced: {type: boolean}
-      provider: {type: string}
-      run_id: {type: string}
-      failure: {type: string}
+    output: *agent_out
     routes:
       - to: deliver
 
@@ -346,6 +363,7 @@ agents:
            "{% if research_agent is defined %}{{ research_agent.output.run_id }}{% endif %}"]
     timeout: 1500
     output:
+      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       delivered: {type: string}
       head: {type: string}
@@ -362,6 +380,7 @@ agents:
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/integrate.py", "{{ workflow.input.project }}"]
     output:
+      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       merged: {type: string}
       ready: {type: string}
@@ -378,6 +397,7 @@ agents:
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/publish.py", "{{ workflow.input.project }}"]
     output:
+      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       published: {type: string}
       did: {type: string}
@@ -398,7 +418,10 @@ agents:
     description: Record the run (never changes its outcome)
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/stack/steps/record.py"]
-    stdin: "{{ {'receipts': ([reviews.output.receipt] if reviews is defined else []), 'check': {'decision': publish.output.verdict, 'reason': (publish.output.next or adjudicate.output.reason), 'file_sha256': ''}, 'evidence_file': publish.output.evidence_index, 'measurements': {'model_calls': adjudicate.output.model_calls}, 'route': (route.output if route is defined else {'decision': 'NOT_NEEDED', 'reason': 'no model review was needed or allowed in this run'})} | tojson }}"
+    # every model call the judgement rests on: the reviews' receipt, and the preparer's,
+    # implementer's and researcher's calls (the recorder also finds them by their evidence
+    # directories, agent-stack #22; listing them says these are this run's work)
+    stdin: "{{ {'executions': ([prepare_agent.output] if prepare_agent is defined else []) + ([implement_agent.output] if implement_agent is defined else []) + ([research_agent.output] if research_agent is defined else []), 'receipts': ([reviews.output.receipt] if reviews is defined else []), 'check': {'decision': publish.output.verdict, 'reason': (publish.output.next or adjudicate.output.reason), 'file_sha256': ''}, 'evidence_file': publish.output.evidence_index, 'measurements': {'model_calls': adjudicate.output.model_calls}, 'route': (route.output if route is defined else {'decision': 'NOT_NEEDED', 'reason': 'no model review was needed or allowed in this run'})} | tojson }}"
     output:
       mlflow_run_id: {type: string}
       experiment_id: {type: string}
@@ -427,7 +450,7 @@ agents:
   - name: ended_tool_failure
     type: terminate
     status: failed
-    reason: "TOOL_FAILURE (verdict {{ adjudicate.output.verdict }}): {{ adjudicate.output.error }} {{ publish.output.error }}{% if work is defined %} {{ work.output.error }}{% endif %}{% if deliver is defined %} {{ deliver.output.error }}{% endif %}"
+    reason: "TOOL_FAILURE (verdict {{ adjudicate.output.verdict }}): {{ adjudicate.output.error }} {{ publish.output.error }} {{ publish.output.reason }}{% if work is defined %} {{ work.output.error }} {{ work.output.reason }}{% endif %}{% if deliver is defined %} {{ deliver.output.error }} {{ deliver.output.reason }}{% endif %}"
 
 output:
   project: "{{ workflow.input.project }}"

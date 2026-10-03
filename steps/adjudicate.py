@@ -19,11 +19,10 @@ import hashlib, json, os, sys
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
-import stackenv  # noqa: E402
+import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 
-WS_ROOT, _ = stackenv.load(need_proxy=False)
-RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
-WS = os.path.join(WS_ROOT, RUN)
+RUN = step.run_id()
+WS = dfcore.workspace()
 D = os.path.join(WS, "devflow")
 
 
@@ -87,8 +86,8 @@ def main(argv):
     receipt = argv[0] if argv and argv[0] else ""
     p = os.path.join(D, "evaluation.json")
     if not os.path.isfile(p):
-        print(json.dumps({"status": "TOOL_FAILURE", "verdict": "", "phase": "", "progress": "", "integrate": "no",
-                          "state": "", "error": "no evaluation for this run"}))
+        step.out(**{"status": "TOOL_FAILURE", "verdict": "", "phase": "", "progress": "", "integrate": "no",
+                          "state": "", "error": "no evaluation for this run"})
         return 0
     ev = json.load(open(p, encoding="utf-8"))
     if receipt and not os.path.isabs(receipt):
@@ -145,7 +144,7 @@ def main(argv):
              "review_results": [{k: r.get(k) for k in ("source", "valid", "why", "complete", "unverified", "independent")}
                                 for r in reviews["results"]]}
     json.dump(state, open(os.path.join(D, "state.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    print(json.dumps({"status": st["execution"]["status"], "verdict": st["verdict"] or "UNDECIDED",
+    step.out(**{"status": st["execution"]["status"], "verdict": st["verdict"] or "UNDECIDED",
                       "phase": st["phase"], "progress": st["progress"],
                       "integrate": "yes" if (st["verdict"] == "PASS" and st["phase"] == "integrate" and not st["wait"]) else "no",
                       "reason": "; ".join(st["blockers"][:3])[:300] or (st.get("next") or ""),
@@ -153,15 +152,10 @@ def main(argv):
                       "model_calls": calls,
                       # the commit whose checks the task waits on: after a merge, the merge commit
                       "watch": str((ev.get("finalize") or {}).get("merge_commit") or head or ""),
-                      "error": "; ".join(st["execution"]["errors"])[:300]},
-                     ensure_ascii=False))
+                      "error": "; ".join(st["execution"]["errors"])[:300]})
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except Exception as e:
-        print(json.dumps({"status": "TOOL_FAILURE", "verdict": "UNDECIDED", "phase": "", "progress": "",
-                          "integrate": "no", "reason": "", "next": "", "state": "", "model_calls": 0, "watch": "",
-                          "error": f"{type(e).__name__}: {e}"[:300]}))
+    # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
+    sys.exit(step.main(lambda: main(sys.argv[1:]), verdict="UNDECIDED", phase="", progress="", integrate="no", reason="", next="", state="", model_calls=0, watch="", error=dfcore.CRASH))

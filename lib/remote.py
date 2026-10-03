@@ -303,6 +303,14 @@ class GitHubRemote:
         r = self._call("POST", "/pulls", {"head": head_ref, "base": base_ref, "title": title[:250], "body": body})
         return r["number"]
 
+    def commit(self, sha):
+        """{message, parents, author} of a commit, or None when there is none."""
+        c = self._call("GET", f"/git/commits/{sha}", ok404=True)
+        if c is None:
+            return None
+        return {"message": c.get("message") or "", "parents": [p["sha"] for p in c.get("parents") or []],
+                "author": (c.get("author") or {}).get("name", "")}
+
     def materialize(self, sha, dest, only=None):
         """The tree of `sha`, written under dest (the archive's top directory removed). `only`: a
         path prefix to keep. Returns the paths written."""
@@ -621,6 +629,13 @@ class FixtureRemote:
         rows = sorted((p for p in self.r["pulls"].values() if p.get("head_ref") == head_ref),
                       key=lambda p: int(p["number"]), reverse=True)
         return self.pull(rows[0]["number"]) if rows else None
+
+    def commit(self, sha):
+        self._up()
+        c = self.r["commits"].get(sha)
+        if c is None:
+            return None
+        return {"message": c.get("message", ""), "parents": list(c.get("parents", [])), "author": c.get("author", "")}
 
     def create_pull(self, head_ref, base_ref, title, body):
         self._up()

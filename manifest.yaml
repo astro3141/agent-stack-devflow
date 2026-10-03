@@ -31,8 +31,18 @@ requires:
   # start: whether a run needs a model is known only after evaluate, and a router HOLD then means
   # "no model review in this run" (the reviews stay missing and the state says so) — not a refusal
   # of a run that may need no model at all.
-  capabilities: [tool_rights, egress]
-  principals: [devflow-reviewer, devflow-implementer, devflow-researcher, devflow-research-reviewer]
+  # record: every pass ends in stack/steps/record.py.
+  capabilities: [tool_rights, egress, record]
+  # The oldest stack this package was run on (agent-stack docs/packages.md "Moving a package to a
+  # newer stack"): the step helper, one door through agent_task.py, admit_models.py, the state root.
+  stack: {min: c872360}
+  # A task's state lives with the work: one comment on the task's GitHub issue, edited in place — a
+  # sentence for people, and for the next pass the counters (budgets, rounds, reworks), done-keys
+  # and the commits devflow pushed. Read back only from devflow's own comment (its account, through
+  # its App). Not in the stack's backup; it outlives this machine. devflow also keeps a cache of
+  # commit trees under <state_root>/devflow/tree-cache — rebuilt from GitHub, safe to delete.
+  state: "github issue comments (one devflow state comment per task issue)"
+  # (the roles are principals.yaml, applied by scripts/up.sh; requires.principals was read by nothing)
   # What this package needs in the environment, declared so the operator is told before a run
   # instead of by a step's error several minutes in. Names and purposes only: the value is the
   # operator's, it arrives from a git-ignored file on the host, and nothing here ever reads it
@@ -46,6 +56,16 @@ requires:
     - name: DEVFLOW_GITHUB_TOKEN
       purpose: instead of 연결 — a token to read the project's issues and pull requests, push devflow's branch, write reviews and statuses
       file: docker/package.env
+    # Read by the steps, never set in operation: the controls point them at temporary directories.
+    # The stack names no place for these three (its runtime paths carry no hand-in root, no
+    # instance-configuration root and no egress-profile directory), so the defaults are the stack's
+    # layout as of the floor above.
+    - name: DEVFLOW_HANDOFF
+      purpose: "tests only — the hand-in root (default /work/handoff)"
+    - name: DEVFLOW_PROJECTS
+      purpose: "tests only — where project registrations live (default /work/config/devflow/projects)"
+    - name: AGENTSTACK_EGRESS_PROFILES_DIR
+      purpose: "tests only — the egress profiles' allow files, read to tell a model its hosts (default /work/docker/egress/profiles)"
 
 # GitHub, connected from the panel (OPERATIONS §44): the operator presses 연결, opens GitHub's page,
 # types the code the panel shows. steps/github_login.py runs that device flow and writes token.json

@@ -21,7 +21,7 @@ Groups, by the risk each pins:
   implement   devflow prepares and implements within the canonical rules; what it may push, when it
               stops, whose branch it is
 """
-import copy, hashlib, json, os, secrets, shutil, subprocess, sys, tempfile
+import contextlib, copy, hashlib, io, json, os, secrets, shutil, subprocess, sys, tempfile
 
 PKG = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(PKG, "fixtures"))
@@ -242,6 +242,8 @@ def controls_flow():
         r2 = s.run()
         check("after the merge the next run verifies the merge commit and ends done",
               (verdict(r2), phase(r2), r2["state"]["progress"]), ("PASS", "done", "stopped"))
+        check("and the commit it says to wait on is the merge commit, not the pull request's head",
+              r2["adjudicate"].get("watch"), R(s.db)["pulls"]["7"]["merge_commit_sha"])
         check("and releases the lock this change held", R(s.db)["refs"].get("refs/devflow/lock/collection-plan"), None)
         check("one state comment for the task, edited in place",
               len([c for c in R(s.db)["issues"]["3"]["comments"] if "devflow:state" in c["body"]]), 1)
@@ -914,6 +916,36 @@ def controls_effects():
     finally:
         s.close()
 
+    # a push whose answer was lost, met again when the step is re-entered (a retry, or a resume
+    # that starts the step over — agent-stack §84): this run's own commit is recognised and kept;
+    # a commit someone else put there is not taken for it
+    import importlib.util
+    from remote import FixtureRemote
+    s = Sim(build.scanner_pass())
+    try:
+        rem = FixtureRemote(s.path, build.REPO)
+        base_sha = R(s.db)["branches"][build.CANONICAL]
+        author = {"name": "devflow-implementer", "email": "x", "date": "2026-10-03T00:00:00Z"}
+        mine = rem.push_commit("devflow/t-x", base_sha, {"a.txt": (b"x", "100644")},
+                               "T-X: x\n\nDevflow-Task: T-X\nDevflow-Run: ctl-run-1\n", author)
+        other = rem.push_commit("devflow/t-y", base_sha, {"b.txt": (b"y", "100644")},
+                                "a person's commit\n\nDevflow-Run: ctl-run-1\n", dict(author, name="someone"))
+        os.environ["CONDUCTOR_SELF_RUN_ID"] = "ctl-run-1"
+        spec = importlib.util.spec_from_file_location("deliver_ctl", os.path.join(STEPS, "deliver.py"))
+        deliver = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(deliver)
+        check("a push this run made, whose answer was lost, is recognised as its own",
+              deliver.own_push(rem, mine, {"parent": base_sha}), True)
+        check("but not a commit by anyone else, nor one onto another parent",
+              (deliver.own_push(rem, other, {"parent": base_sha}), deliver.own_push(rem, mine, {"parent": "f" * 40})),
+              (False, False))
+        os.environ["CONDUCTOR_SELF_RUN_ID"] = "ctl-run-2"
+        spec.loader.exec_module(deliver)
+        check("nor another run's push", deliver.own_push(rem, mine, {"parent": base_sha}), False)
+    finally:
+        os.environ.pop("CONDUCTOR_SELF_RUN_ID", None)
+        s.close()
+
 
 # ================================================================================== rules
 def controls_rules():
@@ -963,14 +995,16 @@ def controls_rules():
 def controls_tool():
     print("")
     print("tool — machinery failing is not a judgement about the work")
-    # outside the stack's PYTHONPATH a step cannot know its workspace or its egress: it stops
+    # outside the stack's PYTHONPATH a step cannot know its workspace or its egress: it stops before
+    # answering anything — `import step` fails, which agent-stack's contract calls the right answer
+    # (a step that carried on with a guessed root would answer like one that did not)
     env = {**os.environ, "PYTHONPATH": "", "CONDUCTOR_SELF_RUN_ID": "ctl-" + secrets.token_hex(4)}
     for name, args in (("evaluate.py", ["scanner-fixture", "3", "ctl", "external"]), ("adjudicate.py", [""]),
                        ("integrate.py", ["scanner-fixture"]), ("publish.py", ["scanner-fixture"]),
                        ("review_plan.py", ["claude", "claude", "direct", "devflow-reviewer"])):
         out = step(name, args, env)
-        check(f"{name} without the stack's settings: TOOL_FAILURE, not a run on defaults",
-              (out.get("status"), "settings" in str(out.get("error"))), ("TOOL_FAILURE", True))
+        check(f"{name} outside the stack: stops at `import step`, no answer on defaults",
+              (out.get("status"), "No module named 'step'" in str(out.get("error"))), ("CRASH", True))
     s = Sim(build.scanner_pass())
     try:
         s.edit(lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"],
@@ -1517,9 +1551,21 @@ def controls_implement():
         dfcore.open_remote = orig
     check("drive: CI has settled when the checks have — devflow's own in-progress verdict is not CI",
           (settled[0], stub.sha), (True, "m" * 40))
-    check("drive: after a merge it watches the merge commit (the pass names it), not the pull request's head",
-          ("watch" in open(os.path.join(STEPS, "drive.py"), encoding="utf-8").read(),
-           "merge_commit" in open(os.path.join(STEPS, "adjudicate.py"), encoding="utf-8").read()), (True, True))
+    # after a merge: the pass names the merge commit as the one to wait on, and the drive waits there
+    passes = [{"ok": True, "run": "p1", "phase": "integrate", "verdict": "PASS", "wait": "verification",
+               "owner": "CI", "head": "h" * 40, "watch": "m" * 40},
+              {"ok": True, "run": "p2", "phase": "done", "verdict": "PASS"}]
+    watched = []
+    saved = drive.one_pass, drive.settle
+    drive.one_pass = lambda *a, **k: passes.pop(0)
+    drive.settle = lambda project, head, *a, **k: (watched.append(head), (True, 0))[1]
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            drive.main(["scanner-fixture", "3", "p", "lt", "model", "3", "1", "10"])
+    finally:
+        drive.one_pass, drive.settle = saved
+    check("drive: after a merge it waits on the commit the pass names (the merge commit), not the pull request's head",
+          watched, ["m" * 40])
 
 
 def controls_auth():

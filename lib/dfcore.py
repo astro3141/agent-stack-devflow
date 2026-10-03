@@ -64,6 +64,40 @@ CHECK_FAILED = {"failure"}
 CHECK_TOOL = {"cancelled", "timed_out", "startup_failure", "action_required", "stale"}
 CHECK_NOT_RUN = {"skipped", "neutral", None}
 
+# what a crashed step puts in `error`: step.main (agent-stack stack/steps/step.py) carries the
+# exception under `reason`, the one key it writes; `error` points there
+CRASH = "the step failed: see reason"
+
+
+# ------------------------------------------------------------------- where a step works (the stack's)
+def _settings_or_refuse(what):
+    """The stack's answer, or the step stops with TOOL_FAILURE saying why: a step outside the
+    stack's agent that carried on with a guessed root would run, on a fixture, exactly like one
+    that did not (agent-stack docs/packages.md; lib/stackenv.py's history before the step helper)."""
+    import step
+    try:
+        return what(step)
+    except Exception as e:
+        step.refuse(f"the stack's settings are not readable ({type(e).__name__}: {e}); a devflow step runs "
+                    "inside the stack's agent, with the PYTHONPATH it sets (agent-stack docs/packages.md)",
+                    status="TOOL_FAILURE", error="the stack's settings are not readable")
+
+
+def workspace():
+    """This run's workspace, <workspace_root>/<run id> (agent-stack stack/steps/step.py)."""
+    return _settings_or_refuse(lambda step: step.workspace())
+
+
+def egress_env():
+    """The proxy environment devflow's own GitHub calls go through (the stack's shared egress)."""
+    return _settings_or_refuse(lambda step: __import__("settings").egress_env())
+
+
+def state_dir(*parts):
+    """devflow's state outside any run: <state_root>/devflow/... (agent-stack docs/packages.md,
+    "State that outlives a run"; requires.state). Today: the commit-tree cache."""
+    return os.path.join(_settings_or_refuse(lambda step: step.runtime()["paths"]["state_root"]), "devflow", *parts)
+
 
 def sha256(data):
     if isinstance(data, str):

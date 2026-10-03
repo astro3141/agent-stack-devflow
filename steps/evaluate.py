@@ -21,21 +21,19 @@ import json, os, re, shutil, sys, time
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
-import stackenv  # noqa: E402
+import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 import remote as remote_mod  # noqa: E402
 import refs  # noqa: E402
 
-WS_ROOT, PROXY = stackenv.load()
-RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
-WS = os.path.join(WS_ROOT, RUN)
+RUN = step.run_id()
+WS = dfcore.workspace()
+PROXY = dfcore.egress_env()
 D = os.path.join(WS, "devflow")
 HANDOFF = os.environ.get("DEVFLOW_HANDOFF", "/work/handoff")
-CACHE = os.path.join(WS_ROOT, ".devflow-cache")
+CACHE = dfcore.state_dir("tree-cache")   # commit trees, kept across runs (requires.state)
 SAFE = re.compile(r"[A-Za-z0-9._-]{1,80}")
 
 
-def emit(**kw):
-    print(json.dumps(kw, ensure_ascii=False))
 
 
 def stage_fixture(name):
@@ -166,7 +164,7 @@ def main(argv):
         ev.update(extra)
         json.dump(ev, open(os.path.join(D, "evaluation.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         need = [a for a in ev.get("assignments") or [] if a.get("by") == "model"]
-        emit(status="TOOL_FAILURE" if ev["tool"] else "OK", evaluation=os.path.join(D, "evaluation.json"),
+        step.out(reason="", status="TOOL_FAILURE" if ev["tool"] else "OK", evaluation=os.path.join(D, "evaluation.json"),
              lane=ev.get("lane") or "change",
              need_models="yes" if need and not ev["tool"] else "no", assignments=len(need),
              # the model families this round needs all of (a lens that must be completed by
@@ -712,8 +710,5 @@ def write_prompt(a, chosen, frame, ev):
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except Exception as e:           # a step answers in JSON, it does not raise (docs/packages.md)
-        emit(status="TOOL_FAILURE", evaluation="", need_models="no", assignments=0, models="", merged="no",
-             frame="", head="", error=f"{type(e).__name__}: {e}"[:300])
+    # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
+    sys.exit(step.main(lambda: main(sys.argv[1:]), evaluation="", need_models="no", assignments=0, models="", merged="no", frame="", head="", lane="change", error=dfcore.CRASH))

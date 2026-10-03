@@ -13,26 +13,26 @@ import json, os, sys
 
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
-import stackenv  # noqa: E402
+import dfcore  # noqa: E402
+import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 
-WS_ROOT, _ = stackenv.load(need_proxy=False)
-D = os.path.join(WS_ROOT, os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual"), "devflow")
+D = os.path.join(dfcore.workspace(), "devflow")
 
 
 def main(argv):
     if not argv or argv[0] != "True":
-        print(json.dumps({"proceed": "no", "why": "preparation did not produce its file in this attempt"}))
+        step.out(**{"proceed": "no", "why": "preparation did not produce its file in this attempt"})
         return 0
     try:
         doc = json.load(open(os.path.join(D, "prepare.json"), encoding="utf-8"))
     except (OSError, ValueError) as e:
-        print(json.dumps({"proceed": "no", "why": f"prepare.json is not readable: {type(e).__name__}"}))
+        step.out(**{"proceed": "no", "why": f"prepare.json is not readable: {type(e).__name__}"})
         return 0
     open_items = len(doc.get("decisions") or []) + len(doc.get("gaps") or []) + len(doc.get("research") or [])
     ok = doc.get("proceed") is True and not open_items
-    print(json.dumps({"proceed": "yes" if ok else "no",
+    step.out(**{"proceed": "yes" if ok else "no",
                       "why": "preparation settled the task" if ok else
-                      f"preparation leaves {open_items} question(s) open (decisions, gaps or research)"}, ensure_ascii=False))
+                      f"preparation leaves {open_items} question(s) open (decisions, gaps or research)"})
     return 0
 
 

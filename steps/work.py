@@ -25,24 +25,25 @@ import hashlib, json, os, shutil, sys, time
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
-import stackenv  # noqa: E402
+import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 import remote as remote_mod  # noqa: E402
 from wstree import tree_map  # noqa: E402
 import refs  # noqa: E402
 
-WS_ROOT, PROXY = stackenv.load()
-RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
-WS = os.path.join(WS_ROOT, RUN)
+RUN = step.run_id()
+WS = dfcore.workspace()
+PROXY = dfcore.egress_env()
 D = os.path.join(WS, "devflow")
 REPO = os.path.join(WS, "repo")
 REF = os.path.join(WS, "reference")
 CRIT = os.path.join(WS, "criteria")
-CACHE = os.path.join(WS_ROOT, ".devflow-cache")
+CACHE = dfcore.state_dir("tree-cache")   # commit trees, kept across runs (requires.state)
 
 
 def emit(**kw):
     kw.setdefault("error", "")
-    print(json.dumps(kw, ensure_ascii=False))
+    kw.setdefault("reason", "")
+    step.out(**kw)
 
 
 def cached_tree(rem, sha, only=None):
@@ -238,11 +239,5 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except (dfcore.ConfigError, remote_mod.RemoteError) as e:
-        emit(status="TOOL_FAILURE", stage="", workspace=WS, prompt_prepare="", prompt_implement="",
-             round=0, error=f"{type(e).__name__}: {e}"[:300])
-    except Exception as e:
-        emit(status="TOOL_FAILURE", stage="", workspace=WS, prompt_prepare="", prompt_implement="",
-             round=0, error=f"{type(e).__name__}: {e}"[:300])
+    # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
+    sys.exit(step.main(lambda: main(sys.argv[1:]), stage="", workspace="", prompt_prepare="", prompt_implement="", prompt_research="", round=0, error=dfcore.CRASH))

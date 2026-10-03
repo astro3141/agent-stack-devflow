@@ -35,13 +35,13 @@ def login_dir():
     it there), <logins_root>/pkg-devflow for every step afterwards."""
     if os.environ.get("DEVFLOW_GITHUB_HOME"):
         return os.environ["DEVFLOW_GITHUB_HOME"]
-    root = os.environ.get("DEVFLOW_LOGINS_ROOT")
-    if not root:
-        try:
-            import settings  # the platform's, on PYTHONPATH (stackenv)
-            root = settings.runtime()["paths"]["logins_root"]
-        except Exception:
-            root = "/route"
+    try:
+        import step  # the stack's step helper, on the PYTHONPATH the stack sets
+        root = step.runtime()["paths"]["logins_root"]
+    except Exception as e:
+        # not a guessed /route: a step that cannot read the stack's settings is outside the stack
+        raise AuthError(f"the stack's settings are not readable ({type(e).__name__})",
+                        hint="a devflow step runs inside the stack's agent (agent-stack docs/packages.md)")
     return os.path.join(root, LOGIN_NAME)
 
 

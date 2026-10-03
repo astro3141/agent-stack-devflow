@@ -15,15 +15,26 @@ REPEATABLE = "yes"
 import json, os, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
-import stackenv  # noqa: E402
+import dfcore  # noqa: E402
+import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 
-WS_ROOT, _ = stackenv.load(need_proxy=False)
-RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
-D = os.path.join(WS_ROOT, RUN, "devflow")
+D = os.path.join(dfcore.workspace(), "devflow")
+
+
+def binding(profile, provider, route):
+    """A named model's login and model route, as the profile's routing tables give them (the
+    tables agent-stack's roles.py reads); a provider the profile does not list keeps its own name
+    as its login and the route this run was given — what every call did before this lookup."""
+    try:
+        import settings
+        r = (settings.profile(profile) or {}).get("routing") or {}
+    except Exception:
+        r = {}
+    return (r.get("login") or {}).get(provider, provider), (r.get("model_route") or {}).get(provider, route)
 
 
 def main(argv):
-    provider, login, route, principal = (argv + ["", "", "", ""])[:4]
+    provider, login, route, principal, profile = (argv + ["", "", "", "", ""])[:5]
     ev = json.load(open(os.path.join(D, "evaluation.json"), encoding="utf-8"))
     members = []
     for a in ev.get("assignments") or []:
@@ -32,8 +43,9 @@ def main(argv):
         # an assignment that names its model (reviews.distinct_models) runs on that model, with that
         # model's login, as the principal the assignment names — or the reviewer given here
         own = a.get("provider")
+        own_login, own_route = binding(profile, own, route) if own else (login, route)
         member = {"label": a["reviewer"], "steps": [{
-            "kind": "model", "provider": own or provider, "login": own or login, "route": route,
+            "kind": "model", "provider": own or provider, "login": own_login, "route": own_route,
             "prompt": a["prompt"], "expected": a["expected"], "principal": a.get("principal") or principal}]}
         # a member that did not produce (a failure or a time-out, never a denial) may be run again,
         # as many times as the project's policy says — the platform counts every attempt
@@ -42,14 +54,11 @@ def main(argv):
         members.append(member)
     plan = os.path.join(D, "review_plan.json")
     json.dump({"members": members}, open(plan, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    print(json.dumps({"status": "OK" if members else "EMPTY", "plan": plan, "members": len(members),
-                      "context": ev["frame"]["id"]}))
+    step.out(**{"reason": "", "status": "OK" if members else "EMPTY", "plan": plan, "members": len(members),
+                      "context": ev["frame"]["id"]})
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except Exception as e:
-        print(json.dumps({"status": "FAILED", "plan": "", "members": 0, "context": "",
-                          "error": f"{type(e).__name__}: {e}"[:300]}))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), status="FAILED", plan="", members=0, context="",
+                       error="the step failed: see reason"))

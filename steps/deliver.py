@@ -28,13 +28,13 @@ import fnmatch, json, os, re, subprocess, sys, time
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
-import stackenv  # noqa: E402
+import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 import remote as remote_mod  # noqa: E402
 from wstree import tree_map  # noqa: E402
 
-WS_ROOT, PROXY = stackenv.load()
-RUN = os.environ.get("CONDUCTOR_SELF_RUN_ID", "manual")
-WS = os.path.join(WS_ROOT, RUN)
+RUN = step.run_id()
+WS = dfcore.workspace()
+PROXY = dfcore.egress_env()
 D = os.path.join(WS, "devflow")
 REPO = os.path.join(WS, "repo")
 
@@ -118,10 +118,10 @@ def main(argv):
         st["delivery"] = report
         json.dump(st, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         json.dump(report, open(os.path.join(D, "delivery.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        print(json.dumps({"status": "OK", "delivered": "yes" if ok and report.get("head") else "no",
+        step.out(**{"reason": "", "status": "OK", "delivered": "yes" if ok and report.get("head") else "no",
                           "head": report.get("head") or "", "pr": str(report.get("pr") or ""),
                           "hold": report.get("hold") or "", "failure": report.get("failure") or "",
-                          "error": ""}, ensure_ascii=False))
+                          "error": ""})
         return 0
 
     prep = read_json(os.path.join(D, "prepare.json")) if prep_ok else None
@@ -194,11 +194,12 @@ def main(argv):
         rem = dfcore.open_remote(reg, WS, PROXY)
         now = rem.branch_head_or_none(branch)
         expect = None if work.get("new_branch") else work["parent"]
-        if now != expect:
+        landed = now != expect and own_push(rem, now, work)
+        if now != expect and not landed:
             return finish(False, failure=f"branch {branch} is at {str(now)[:12]}, not at {str(expect)[:12]}: "
                                          "someone else moved it; devflow does not overwrite it")
-        head = rem.push_commit(branch, work["parent"], changes_blob, message, author,
-                               base=work["base"], extra_parents=work.get("extra_parents") or [])
+        head = now if landed else rem.push_commit(branch, work["parent"], changes_blob, message, author,
+                                                  base=work["base"], extra_parents=work.get("extra_parents") or [])
         hist["pushed"] = list(hist.get("pushed") or []) + [head]
         report["head"] = head
         pr = rem.find_pull(branch)
@@ -292,10 +293,11 @@ def deliver_research(project, reg, pol, impl, task, ev, st, hist, work, snap, re
         rem = dfcore.open_remote(reg, WS, PROXY)
         now = rem.branch_head_or_none(branch)
         expect = None if work.get("new_branch") else work["parent"]
-        if now != expect:
+        landed = now != expect and own_push(rem, now, work)
+        if now != expect and not landed:
             return finish(False, failure=f"branch {branch} is at {str(now)[:12]}, not at {str(expect)[:12]}: "
                                          "someone else moved it; devflow does not overwrite it")
-        head = rem.push_commit(branch, work["parent"], blobs, message, author, base=work["base"])
+        head = now if landed else rem.push_commit(branch, work["parent"], blobs, message, author, base=work["base"])
         hist["pushed"] = list(hist.get("pushed") or []) + [head]
         report["head"] = head
         pr = rem.find_pull(branch)
@@ -334,6 +336,17 @@ def deliver_research(project, reg, pol, impl, task, ev, st, hist, work, snap, re
     return finish(True)
 
 
+def own_push(rem, sha, work):
+    """Whether the branch's head is this run's own push — made by an earlier attempt of this step
+    whose answer was lost, or before a stop this run was resumed from (agent-stack §84: a resume
+    re-enters the step from its start). Its message names this run, its author is devflow's
+    implementer, and it sits on the parent this attempt would have pushed onto. Anything else on
+    the branch is someone else's."""
+    c = rem.commit(sha)
+    return bool(c) and f"Devflow-Run: {RUN}" in c["message"] and c["author"] == dfcore.IMPLEMENTER \
+        and c["parents"][:1] == [work["parent"]]
+
+
 def research_requests(task, prep):
     """Preparation's research requests, each with a question ID a research record can answer
     (`Q-<task>-<n>` when preparation gave none) — the ID is how the item resumes."""
@@ -369,8 +382,5 @@ def pr_body(task, ev, prep, done, hold):
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv[1:]))
-    except Exception as e:
-        print(json.dumps({"status": "TOOL_FAILURE", "delivered": "no", "head": "", "pr": "", "hold": "",
-                          "failure": "", "error": f"{type(e).__name__}: {e}"[:300]}))
+    # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
+    sys.exit(step.main(lambda: main(sys.argv[1:]), delivered="no", head="", pr="", hold="", failure="", error=dfcore.CRASH))

@@ -9,10 +9,11 @@ of those sentences and what each one asks.
 
 | what | where | check |
 |---|---|---|
-| install the package | `config/packages.local.yaml` + `scripts/packages.sh install devflow` | `scripts/packages.sh verify` |
+| the stack | at least the revision `manifest.yaml` names under `requires.stack.min` (the runner refuses an older one) | `stack/packages.py stack` |
+| install the package | `config/packages.local.yaml` + `scripts/packages.sh install devflow` | `scripts/packages.sh verify` (runs `controls.py` in the agent) |
 | create the roles | `scripts/up.sh` (applies `principals.yaml`) | `principals.py list` shows `devflow-implementer`, `devflow-researcher`, `devflow-reviewer`, `devflow-research-reviewer` |
 | provision the egress profiles the roles name | the stack's `docker/egress/profiles/<name>.allow` + compose — `closed`, `research`, `research-review` | the broker's `/health` lists them; a role mapped to a missing profile is refused by name |
-| GitHub | register a GitHub App (device flow on, token expiry off), put its Client ID in `docker/package.env` as `DEVFLOW_GITHUB_CLIENT_ID`, restart; then panel → 워크플로 실행 → devflow → **연결** | the panel shows 연결됨 |
+| GitHub | register a GitHub App (device flow on, token expiry off), put its Client ID in `docker/package.env` as `DEVFLOW_GITHUB_CLIENT_ID`, restart; then on the panel, devflow's **연결** (the login code is a person's button; the panel starts nothing else) | the panel shows 연결됨 |
 | shared egress for devflow's scripts | `docker/egress/allow.local` (the instance's own, git-ignored; `up.sh` merges it into `config/generated/egress/allow`): `^github\.com$`, `^api\.github\.com$`, `^codeload\.github\.com$`. Only devflow's scripts call GitHub, through the shared proxy; its model roles' profiles (`closed`, `research`, `research-review`) do not reach GitHub, and need not | `up.sh --check`; `grep github config/generated/egress/allow` |
 | the implementer's profile | `config/profiles/long-task.yaml` — claude only, 60-minute calls, `native_allow: [WebSearch, WebFetch]` | `run_workflow.py` refuses an unknown profile |
 
@@ -30,8 +31,12 @@ of those sentences and what each one asks.
 1. Open an issue from the project's task template. The ` ```devflow ` block is what devflow reads:
    `id`, `type`, `goal`, `change_class`, `items`, and `implement: agent` (devflow does the work) or
    `implement: human` (a person opens the pull request and names it: `pr: <n>`).
-2. Panel → 워크플로 실행 → **devflow-auto**, `project=<registration>`, `issue=<n>` — or
+2. Start **devflow-auto** with a command — the panel shows runs and commands, it starts nothing
+   (agent-stack §70): on the host, `scripts/cycle.sh devflow-auto research-default
+   project=<registration> issue=<n>`; or in the agent,
    `run_workflow.py start <id> devflow-auto research-default project=<p> issue=<n> --detach`.
+   A stopped run continues with `run_workflow.py resume <id>`: the step it stopped in starts over
+   (agent-stack §84), and devflow's steps recognise what they had already done on GitHub.
 3. Watch the issue: one devflow comment, edited in place, and the commit status `devflow/verdict`
    on each judged head.
 
@@ -123,7 +128,7 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 | what state is the task in | the issue's devflow comment; the head's `devflow/verdict` status |
 | what a pass did, step by step | panel → 실행 기록, or `run_workflow.py show <id>` / `tail <id>` |
 | what a model was given | `/ws/<conductor run>/devflow/` — `prompt_*.md`, `materials/`, `evaluation.json` |
-| what a model did | `/work/evidence/p281/<run>-<label>-<provider>/` — `result.json`, `permissions.jsonl`, `events.jsonl` |
+| what a model did | `<evidence_root>/<run>-<label>-<provider>/` (`-a<n>` for a fan-out member's retry, `-r<n>` for a call made again after a resume) — `execution.json`, `result.json`, `permissions.jsonl`, `events.jsonl`; every call is also in the pass's MLflow record |
 | where a brokered call went out | the profile proxy's log (`docker logs <stack>-egress-<profile>`) |
 
 ## 9. Known failure shapes (measured)
@@ -132,8 +137,9 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 |---|---|---|
 | every write waits 300 s and expires | a principal rule using `endsWith(...)` | use `contains(...)` (Preloop evaluates it) |
 | a review finished but was DENIED at the write | the review file's name is outside the reviewer's write rule (`review_r*`) | reviewer labels must keep the `r` prefix |
-| a brokered step refused as `invalid expected` | an old runner without subdirectory paths | stack ≥ `24ab1fb` |
-| a long call killed at 15 minutes through the broker | an old `broker_dispatch.py` with a fixed 900 s | stack ≥ `2985815` |
+| a brokered step refused as `invalid expected` | an old runner without subdirectory paths | a stack at `requires.stack.min` (the runner refuses older) |
+| a long call killed at 15 minutes through the broker | an old `broker_dispatch.py` with a fixed 900 s | likewise |
 | two passes in the same state, auto stopped | the router held (quota observation rate-limited, or quota spent) | devflow ≥ `6d6b4b7` waits; if quota is spent, start again later |
-| WebFetch refused on the role's own hosts | the step did not run in its role's profile | devflow ≥ `785b54a` (its model steps call `broker_dispatch.py`) |
+| WebFetch refused on the role's own hosts | the step did not run in its role's profile | a stack whose `agent_task.py` hands a role with an egress profile to the broker (the floor above) |
+| a marker comment's counters ignored, "not written by devflow" on the issue | the comment is not devflow's own (another author, or the same person by hand) | nothing — only devflow's own state comment carries its counters |
 | codex writes a file as `undefined`, or reaches for its own edit tool | codex's own behaviour | keep `long-task` claude-only for implementer and researcher |
