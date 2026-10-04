@@ -52,7 +52,7 @@ def main(argv):
     def finish(status="OK", **kw):
         st.setdefault("integration", {}).update(act, **kw)
         json.dump(st, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        step.out(**{"reason": "", "status": status, "merged": "yes" if kw.get("merged") else "no",
+        step.out(**{"status": status, "merged": "yes" if kw.get("merged") else "no",
                           "ready": "yes" if kw.get("ready") else "no", "phase": st["phase"],
                           "progress": st["progress"], "detail": "; ".join(act["did"] + act["skipped"])[:300],
                           "error": kw.get("error", "")})
@@ -189,4 +189,4 @@ def main(argv):
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(sys.argv[1:]), merged="no", ready="no", phase="", progress="", detail="", error=dfcore.CRASH))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), merged="no", ready="no", phase="", progress="", detail="", error="", failure_key="error"))

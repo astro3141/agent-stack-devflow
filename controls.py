@@ -27,10 +27,16 @@ PKG = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(PKG, "fixtures"))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import build  # noqa: E402
+sys.path.insert(0, "/work/stack/steps")
+import step as stack_step  # noqa: E402 — the roots, as the steps see them
 
 PY = sys.executable
 STEPS = os.path.join(PKG, "steps")
-WS_ROOT = os.environ.get("AGENTSTACK_WORKSPACE_ROOT", "/ws")
+# under scripts/packages.sh controls the workspace, evidence and state roots are a scratch
+# directory for this process (agent-stack #54); the hand-in root is the instance's own
+PATHS = stack_step.runtime()["paths"]
+WS_ROOT = PATHS["workspace_root"]
+HANDOFF_ROOT = PATHS["handoff_root"]
 PASS_, FAIL_ = [], []
 
 
@@ -52,8 +58,11 @@ class Sim:
     """A task on a fixture remote that persists across runs, like a real one."""
 
     def __init__(self, db):
-        self.dir = tempfile.mkdtemp(prefix="devflow-ctl-")
-        self.path = os.path.join(self.dir, "ctl.json")
+        # the fixture remote is a hand-in by name (step.handoff), under the instance's hand-in
+        # root, named for this control alone and removed by close()
+        self.name = "ctl-" + secrets.token_hex(6)
+        os.makedirs(HANDOFF_ROOT, exist_ok=True)
+        self.path = os.path.join(HANDOFF_ROOT, f"{self.name}.json")
         self.save(db)
         self.runs = []
 
@@ -72,10 +81,10 @@ class Sim:
 
     def run(self, review_mode="external", receipt=None, project="scanner-fixture"):
         rid = "ctl-" + secrets.token_hex(4)
-        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid, "DEVFLOW_HANDOFF": self.dir}
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid}
         ws = os.path.join(WS_ROOT, rid)
         r = {"ws": ws}
-        r["evaluate"] = step("evaluate.py", [project, "3", "ctl", review_mode], env)
+        r["evaluate"] = step("evaluate.py", [project, "3", self.name, review_mode], env)
         rc = receipt(ws) if receipt else ""
         r["adjudicate"] = step("adjudicate.py", [rc], env)
         a = r["adjudicate"]
@@ -94,11 +103,11 @@ class Sim:
         ws)` stands in for the model steps: it writes into ws/repo and ws/devflow/<stage>.json and
         returns whether it produced its file (a model that fails returns False)."""
         rid = "ctl-" + secrets.token_hex(4)
-        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid, "DEVFLOW_HANDOFF": self.dir}
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid}
         ws = os.path.join(WS_ROOT, rid)
         self.runs.append(ws)
         r = {"ws": ws}
-        r["evaluate"] = step("evaluate.py", [project, "3", "ctl", review_mode], env)
+        r["evaluate"] = step("evaluate.py", [project, "3", self.name, review_mode], env)
         r["adjudicate"] = step("adjudicate.py", [""], env)
         r["act"] = step("act.py", [], env)
         do = r["act"].get("do")
@@ -126,7 +135,10 @@ class Sim:
         return r
 
     def close(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
         for ws in self.runs:
             shutil.rmtree(ws, ignore_errors=True)
 
@@ -467,8 +479,8 @@ def controls_stale():
     s = Sim(build.scanner_pass())
     try:
         rid = "ctl-" + secrets.token_hex(4)
-        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid, "DEVFLOW_HANDOFF": s.dir}
-        step("evaluate.py", ["scanner-fixture", "3", "ctl", "external"], env)
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid}
+        step("evaluate.py", ["scanner-fixture", "3", s.name, "external"], env)
         step("adjudicate.py", [""], env)
         s.edit(lambda db: build.push_new_head(db))
         out = step("integrate.py", ["scanner-fixture"], env)
@@ -864,8 +876,8 @@ def controls_shared():
     s = Sim(build.scanner_pass())
     try:
         rid = "ctl-" + secrets.token_hex(4)
-        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid, "DEVFLOW_HANDOFF": s.dir}
-        step("evaluate.py", ["scanner-fixture", "3", "ctl", "external"], env)
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid}
+        step("evaluate.py", ["scanner-fixture", "3", s.name, "external"], env)
         step("adjudicate.py", [""], env)
         s.edit(lambda db: build.move_canonical(db))
         step("integrate.py", ["scanner-fixture"], env)
@@ -1426,11 +1438,24 @@ def controls_implement():
         plan = json.load(open(os.path.join(r2["ws"], "devflow", "review_plan.json"), encoding="utf-8")) \
             if os.path.isfile(os.path.join(r2["ws"], "devflow", "review_plan.json")) else None
         env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(r2["ws"])}
-        step("review_plan.py", ["claude", "claude", "direct", "devflow-reviewer"], env)
-        plan = json.load(open(os.path.join(r2["ws"], "devflow", "review_plan.json"), encoding="utf-8"))
-        check("and each runs on its own model, with its own login and principal",
+        # the admission the round started on, as admit_models.py writes it; the stack's roles.py
+        # binds the named models against it
+        adm = tempfile.mkdtemp(prefix="devflow-adm-")
+
+        def admitted(**eligible):
+            json.dump({"wanted": sorted(eligible), "decision": {"evaluated": [
+                {"provider": p, "eligible": ok, "why": "within limits" if ok else "exhausted: session 91% >= 80%"}
+                for p, ok in eligible.items()]}}, open(os.path.join(adm, "admission.json"), "w"))
+            step("review_plan.py", ["", "", "direct", "devflow-reviewer", "research-default", adm], env)
+            return json.load(open(os.path.join(r2["ws"], "devflow", "review_plan.json"), encoding="utf-8"))
+        plan = admitted(claude=True, codex=True)
+        check("and each runs on its own model, bound by the stack's roles.py: its login and principal",
               sorted((m["steps"][0]["provider"], m["steps"][0]["login"], m["steps"][0]["principal"]) for m in plan["members"]),
               [("claude", "claude", "devflow-research-reviewer"), ("codex", "codex", "devflow-research-reviewer")])
+        plan = admitted(claude=False, codex=True)
+        check("a named model the admission did not find eligible is left out, with the admission's words",
+              ([m["label"] for m in plan["members"]], any("91%" in u for u in plan["unbound"])), (["r2-codex"], True))
+        shutil.rmtree(adm, ignore_errors=True)
 
         def one_person_review(db):
             h = branch_of(db)

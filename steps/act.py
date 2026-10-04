@@ -94,14 +94,14 @@ def main():
         st = json.load(open(os.path.join(D, "state.json"), encoding="utf-8"))
         ev = json.load(open(os.path.join(D, "evaluation.json"), encoding="utf-8"))
     except (OSError, ValueError) as e:
-        step.out(**{"reason": "", "do": "none", "why": f"no state for this run: {type(e).__name__}", "error": str(e)[:200]})
+        step.out(**{"do": "none", "why": f"no state for this run: {type(e).__name__}", "error": str(e)[:200]})
         return 0
     do, why = decide(st, ev)
     json.dump({"do": do, "why": why}, open(os.path.join(D, "act.json"), "w", encoding="utf-8"), ensure_ascii=False)
-    step.out(**{"reason": "", "do": do, "why": why, "error": ""})
+    step.out(**{"do": do, "why": why, "error": ""})
     return 0
 
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(), do="none", why="", error=dfcore.CRASH))
+    sys.exit(step.main(lambda: main(), do="none", why="", error="", failure_key="error"))

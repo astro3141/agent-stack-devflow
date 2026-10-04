@@ -64,11 +64,6 @@ CHECK_FAILED = {"failure"}
 CHECK_TOOL = {"cancelled", "timed_out", "startup_failure", "action_required", "stale"}
 CHECK_NOT_RUN = {"skipped", "neutral", None}
 
-# what a crashed step puts in `error`: step.main (agent-stack stack/steps/step.py) carries the
-# exception under `reason`, the one key it writes; `error` points there
-CRASH = "the step failed: see reason"
-
-
 # ------------------------------------------------------------------- where a step works (the stack's)
 def _settings_or_refuse(what):
     """The stack's answer, or the step stops with TOOL_FAILURE saying why: a step outside the
@@ -144,7 +139,8 @@ def registration(name, root=None):
     nobody has confirmed is written as `UNCONFIRMED:<what is known>` and listed in `unconfirmed`;
     such a registration may run against a fixture and is refused against the real remote.
     """
-    root = root or os.environ.get("DEVFLOW_PROJECTS", "/work/config/devflow/projects")
+    root = root or _settings_or_refuse(
+        lambda step: os.path.join(step.runtime()["paths"]["config_root"], "devflow", "projects"))
     if not re.fullmatch(r"[a-z][a-z0-9-]{1,39}", name or ""):
         raise ConfigError(f"a project name is [a-z][a-z0-9-] of 2 to 40, not {name!r}")
     path = os.path.join(root, f"{name}.yaml")

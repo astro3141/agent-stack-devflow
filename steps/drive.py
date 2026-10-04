@@ -152,4 +152,4 @@ def main(argv):
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(sys.argv[1:]), passes=0, stopped="the step failed: see reason", verdict="", phase="", next="", last_run="", runs=""))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), passes=0, stopped="", verdict="", phase="", next="", last_run="", runs="", failure_key="stopped"))

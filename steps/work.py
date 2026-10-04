@@ -42,7 +42,6 @@ CACHE = dfcore.state_dir("tree-cache")   # commit trees, kept across runs (requi
 
 def emit(**kw):
     kw.setdefault("error", "")
-    kw.setdefault("reason", "")
     step.out(**kw)
 
 
@@ -240,4 +239,4 @@ def main(argv):
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(sys.argv[1:]), stage="", workspace="", prompt_prepare="", prompt_implement="", prompt_research="", round=0, error=dfcore.CRASH))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), stage="", workspace="", prompt_prepare="", prompt_implement="", prompt_research="", round=0, error="", failure_key="error"))

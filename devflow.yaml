@@ -82,7 +82,6 @@ agents:
            "{{ workflow.input.issue }}", "{{ workflow.input.fixture }}", "{{ workflow.input.review_mode }}"]
     timeout: 600
     output:
-      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       evaluation: {type: string}
       need_models: {type: string}
@@ -140,6 +139,7 @@ agents:
       reason: {type: string}
       evaluated: {type: string}
       profile: {type: string}
+      evidence_dir: {type: string}         # admission.json: what roles.py binds the round's models against
     routes:
       - to: review_plan
         when: "{{ admit.output.all_eligible }}"
@@ -154,13 +154,15 @@ agents:
            "{% if route is defined %}{{ route.output.login }}{% endif %}",
            "{% if route is defined %}{{ route.output.model_route }}{% else %}direct{% endif %}",
            "{% if evaluate.output.lane == 'research' %}devflow-research-reviewer{% else %}{{ workflow.input.reviewer }}{% endif %}",
-           "{% if route is defined %}{{ route.output.profile }}{% else %}{{ admit.output.profile }}{% endif %}"]
+           "{% if route is defined %}{{ route.output.profile }}{% else %}{{ admit.output.profile }}{% endif %}",
+           "{% if admit is defined %}{{ admit.output.evidence_dir }}{% elif route is defined %}{{ route.output.evidence_dir }}{% endif %}"]
     output:
-      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       plan: {type: string}
       members: {type: number}
       context: {type: string}
+      unbound: {type: string}
+      error: {type: string}
     routes:
       - to: reviews
         when: "{{ review_plan.output.status == 'OK' }}"
@@ -212,7 +214,6 @@ agents:
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/act.py"]
     output:
-      reason: {type: string}             # empty, or why the step crashed (step.main)
       do: {type: string}
       why: {type: string}
       error: {type: string}
@@ -251,7 +252,6 @@ agents:
     args: ["/work/packages/devflow/steps/work.py", "{{ workflow.input.project }}", "{{ act.output.do }}"]
     timeout: 900
     output:
-      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       stage: {type: string}
       workspace: {type: string}
@@ -363,7 +363,6 @@ agents:
            "{% if research_agent is defined %}{{ research_agent.output.run_id }}{% endif %}"]
     timeout: 1500
     output:
-      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       delivered: {type: string}
       head: {type: string}
@@ -380,7 +379,6 @@ agents:
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/integrate.py", "{{ workflow.input.project }}"]
     output:
-      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       merged: {type: string}
       ready: {type: string}
@@ -397,7 +395,6 @@ agents:
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/publish.py", "{{ workflow.input.project }}"]
     output:
-      reason: {type: string}             # empty, or why the step crashed (step.main)
       status: {type: string}
       published: {type: string}
       did: {type: string}
@@ -450,7 +447,7 @@ agents:
   - name: ended_tool_failure
     type: terminate
     status: failed
-    reason: "TOOL_FAILURE (verdict {{ adjudicate.output.verdict }}): {{ adjudicate.output.error }} {{ publish.output.error }} {{ publish.output.reason }}{% if work is defined %} {{ work.output.error }} {{ work.output.reason }}{% endif %}{% if deliver is defined %} {{ deliver.output.error }} {{ deliver.output.reason }}{% endif %}"
+    reason: "TOOL_FAILURE (verdict {{ adjudicate.output.verdict }}): {{ adjudicate.output.error }} {{ publish.output.error }}{% if work is defined %} {{ work.output.error }}{% endif %}{% if deliver is defined %} {{ deliver.output.error }}{% endif %}"
 
 output:
   project: "{{ workflow.input.project }}"

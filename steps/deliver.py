@@ -118,7 +118,7 @@ def main(argv):
         st["delivery"] = report
         json.dump(st, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         json.dump(report, open(os.path.join(D, "delivery.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        step.out(**{"reason": "", "status": "OK", "delivered": "yes" if ok and report.get("head") else "no",
+        step.out(**{"status": "OK", "delivered": "yes" if ok and report.get("head") else "no",
                           "head": report.get("head") or "", "pr": str(report.get("pr") or ""),
                           "hold": report.get("hold") or "", "failure": report.get("failure") or "",
                           "error": ""})
@@ -383,4 +383,4 @@ def pr_body(task, ev, prep, done, hold):
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(sys.argv[1:]), delivered="no", head="", pr="", hold="", failure="", error=dfcore.CRASH))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), delivered="no", head="", pr="", hold="", failure="", error="", failure_key="error"))

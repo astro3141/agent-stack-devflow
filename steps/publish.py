@@ -41,7 +41,7 @@ def main(argv):
     project = argv[0]
     sp = os.path.join(D, "state.json")
     if not os.path.isfile(sp):
-        step.out(**{"reason": "", "status": "TOOL_FAILURE", "published": "no", "evidence_index": "", "error": "no state for this run"})
+        step.out(**{"status": "TOOL_FAILURE", "published": "no", "evidence_index": "", "error": "no state for this run"})
         return 0
     st = json.load(open(sp, encoding="utf-8"))
     frame = st.get("frame") or {}
@@ -113,7 +113,7 @@ def main(argv):
               open(idx, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     json.dump(st, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     w = st.get("wait") or {}
-    step.out(**{"reason": "", "status": "TOOL_FAILURE" if err else "OK", "published": "no" if err else "yes",
+    step.out(**{"status": "TOOL_FAILURE" if err else "OK", "published": "no" if err else "yes",
                       "did": "; ".join(did), "skipped": "; ".join(skipped), "evidence_index": idx,
                       # the task's final state for this run, after integration had its say
                       "verdict": st.get("verdict") or "UNDECIDED", "phase": st["phase"],
@@ -126,4 +126,4 @@ def main(argv):
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(sys.argv[1:]), published="no", evidence_index="", wait="", owner="", error=dfcore.CRASH))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), published="no", evidence_index="", wait="", owner="", error="", failure_key="error"))

@@ -158,4 +158,4 @@ def main(argv):
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(sys.argv[1:]), verdict="UNDECIDED", phase="", progress="", integrate="no", reason="", next="", state="", model_calls=0, watch="", error=dfcore.CRASH))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), verdict="UNDECIDED", phase="", progress="", integrate="no", reason="", next="", state="", model_calls=0, watch="", error="", failure_key="error"))

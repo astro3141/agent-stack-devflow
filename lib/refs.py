@@ -101,16 +101,17 @@ PROVIDER_HOSTS = {"chatgpt.com", "auth.openai.com", "api.openai.com", "api.anthr
 
 
 def profile_hosts(profile):
-    """The non-provider hosts an egress profile's allowlist names (agent-stack
-    docker/egress/profiles/<profile>.allow, one anchored regex per line), or None when the file is
-    not readable from here."""
-    root = os.environ.get("AGENTSTACK_EGRESS_PROFILES_DIR", "/work/docker/egress/profiles")
+    """The non-provider hosts an egress profile lets its role reach — the stack's answer
+    (step.egress_hosts: the patterns its proxy reads, agent-stack #55), not a file devflow parses —
+    or None when the stack has no such profile."""
     try:
-        lines = open(os.path.join(root, f"{profile}.allow"), encoding="utf-8").read().splitlines()
-    except OSError:
+        import step
+        patterns = step.egress_hosts(profile)
+    except Exception:
         return None
-    hosts = [l.strip().lstrip("^").rstrip("$").replace("\\.", ".")
-             for l in lines if l.strip() and not l.strip().startswith("#")]
+    if not patterns:
+        return None
+    hosts = [p.lstrip("^").rstrip("$").replace("\\.", ".") for p in patterns]
     return [h for h in hosts if h not in PROVIDER_HOSTS]
 
 

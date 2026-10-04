@@ -29,7 +29,6 @@ RUN = step.run_id()
 WS = dfcore.workspace()
 PROXY = dfcore.egress_env()
 D = os.path.join(WS, "devflow")
-HANDOFF = os.environ.get("DEVFLOW_HANDOFF", "/work/handoff")
 CACHE = dfcore.state_dir("tree-cache")   # commit trees, kept across runs (requires.state)
 SAFE = re.compile(r"[A-Za-z0-9._-]{1,80}")
 
@@ -47,7 +46,7 @@ def stage_fixture(name):
     dest = os.path.join(D, "remote.json")
     if not SAFE.fullmatch(name or ""):
         raise dfcore.ConfigError(f"fixture name {name!r} is not a plain name")
-    shared = os.path.join(HANDOFF, f"{name}.json")
+    shared = step.handoff(f"{name}.json")      # <handoff_root>/<name>.json, the stack's root
     if os.path.isfile(shared):
         if os.path.lexists(dest):
             os.remove(dest)
@@ -164,7 +163,7 @@ def main(argv):
         ev.update(extra)
         json.dump(ev, open(os.path.join(D, "evaluation.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         need = [a for a in ev.get("assignments") or [] if a.get("by") == "model"]
-        step.out(reason="", status="TOOL_FAILURE" if ev["tool"] else "OK", evaluation=os.path.join(D, "evaluation.json"),
+        step.out(status="TOOL_FAILURE" if ev["tool"] else "OK", evaluation=os.path.join(D, "evaluation.json"),
              lane=ev.get("lane") or "change",
              need_models="yes" if need and not ev["tool"] else "no", assignments=len(need),
              # the model families this round needs all of (a lens that must be completed by
@@ -719,4 +718,4 @@ def write_prompt(a, chosen, frame, ev):
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(sys.argv[1:]), evaluation="", need_models="no", assignments=0, models="", merged="no", frame="", head="", lane="change", error=dfcore.CRASH))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), evaluation="", need_models="no", assignments=0, models="", merged="no", frame="", head="", lane="change", error="", failure_key="error"))
