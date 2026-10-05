@@ -558,10 +558,18 @@ def main(argv):
         for l in chosen.values():
             l["read"] = list(l.get("read") or []) + [k for k in l.get("read_if_present") or []
                                                      if k in present and k not in (l.get("read") or [])]
+        # a change's review is a query (agent-stack docs/packages.md "A query"): the materials go in
+        # the prompt, no tools, one turn, and the answer is checked against the review's schema by
+        # the stack. A research record's review keeps its tools — it fetches primary pages to check
+        # the record's attribution, and a query has no web.
+        as_query = ev.get("lane") != "research" and str(rv.get("mode") or "query") == "query"
         for a in assignments:
             if a["by"] == "model":
-                a["prompt"] = write_prompt(a, chosen, frame, ev)
                 a["expected"] = f"review_{a['reviewer']}.json"
+                if as_query:
+                    a["prompt"], a["schema"], a["inlined"] = write_query(a, chosen, frame, ev)
+                else:
+                    a["prompt"] = write_prompt(a, chosen, frame, ev)
     return done(assignments=assignments)
 
 
@@ -691,6 +699,102 @@ RESEARCH_BLOCKING = """- This is a research record: it serves the task's `items`
   what the items need, make it a blocking finding with `affects`; declared under `unverified`, it
   is recorded as a limit of your review and does not hold the record.
 """
+
+
+def review_schema(a, chosen, frame):
+    """The answer a review query must give (agent-stack: the schema keywords the door checks). The
+    head, frame and digests are constants: a review for anything else is not one. Question answers
+    are not required here — an unanswered question leaves its lens incomplete (validate_review),
+    which is a review that says less, not one that broke its shape."""
+    lenses = list(a["lenses"])
+    texts = {"type": "array", "items": {"type": "string"}}
+    by_lens = lambda value: {"type": "object", "additionalProperties": False,
+                             "properties": {l: value for l in lenses}}
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": f"devflow review {a['reviewer']}",
+        "type": "object", "additionalProperties": False,
+        "required": ["head_sha", "frame_id", "policy_digest", "basis_digest", "lenses", "materials",
+                     "answers", "findings", "unverified", "limits", "verdict"],
+        "properties": {
+            "head_sha": {"const": frame["head_sha"]},
+            "frame_id": {"const": frame["id"]},
+            "policy_digest": {"const": frame["policy"]["digest"]},
+            "basis_digest": {"const": frame["basis"]},
+            "lenses": {"type": "array", "items": {"enum": lenses}},
+            "materials": {"type": "array", "items": {
+                "type": "object", "required": ["ref", "read"], "additionalProperties": False,
+                "properties": {"ref": {"type": "string"}, "read": {"type": "boolean"}}}},
+            "answers": by_lens({"type": "object", "additionalProperties": False,
+                                "properties": {q["id"]: {"type": "string"}
+                                               for l in lenses for q in (chosen[l].get("questions") or [])}}),
+            "findings": {"type": "array", "items": {
+                "type": "object", "required": ["lens", "severity", "claim", "basis", "evidence"],
+                "additionalProperties": False,
+                "properties": {
+                    "lens": {"enum": lenses},
+                    "severity": {"enum": ["blocking", "advisory"]},
+                    "claim": {"type": "string", "minLength": 1},
+                    "basis": {"type": "object", "required": ["kind", "ref"], "additionalProperties": False,
+                              "properties": {"kind": {"enum": ["criterion", "contract", "observation", "test", "task"]},
+                                             "ref": {"type": "string"}}},
+                    "evidence": {"type": "string"},
+                    "affects": {"type": "string"}}}},
+            "unverified": by_lens(texts),
+            "limits": by_lens(texts),
+            "verdict": {"enum": ["PASS", "REQUEST_CHANGES", "CONTRACT_GAP", "NEEDS_DECISION"]},
+        },
+    }
+
+
+def write_query(a, chosen, frame, ev):
+    """The review as a query: the instructions, the review's schema, and every material its lenses
+    read, inline. Returns (prompt path, schema path, the material kinds put in the prompt) — what
+    was put in is what was read, whatever the answer lists (adjudicate.py)."""
+    m = os.path.join(D, "materials")
+    index = ev.get("materials") or {}
+    kinds = []
+    for l in a["lenses"]:
+        kinds += [k for k in chosen[l].get("read") or [] if k not in kinds]
+    sections, inlined = [], []
+    for k in kinds:
+        entry = index.get(k)
+        names = entry if isinstance(entry, list) else ([entry] if entry else [])
+        if not names:
+            continue
+        inlined.append(k)
+        for name in names:
+            p = os.path.join(m, name)
+            if os.path.isdir(p):
+                continue
+            try:
+                body = open(p, encoding="utf-8").read()
+            except OSError as e:
+                body = f"(not readable: {type(e).__name__})"
+            sections.append(f"## {k}: {name}\n\n````\n{body}\n````\n")
+    if index.get("not_shown"):
+        sections.append("## not_shown\n\n" + "\n".join(f"- {x['ref']} ({x['bytes']} bytes > {x['limit']})"
+                                                         for x in index["not_shown"]) + "\n")
+    schema = review_schema(a, chosen, frame)
+    sp = os.path.join(D, f"schema_{a['reviewer']}.json")
+    json.dump(schema, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    lens_text = []
+    for lid in a["lenses"]:
+        l = chosen[lid]
+        qs = "\n".join(f"    - `{q['id']}`: {q['q']}" for q in l.get("questions") or [])
+        lens_text.append(f"- **{lid}** — {l.get('title', '')}\n  read: {', '.join(l.get('read') or [])}\n  questions:\n{qs}")
+    tpl = open(os.path.join(PKG, "prompts", "review_query.md"), encoding="utf-8").read()
+    body = (tpl.replace("{LENSES}", "\n".join(lens_text))
+               .replace("{LENS_IDS}", json.dumps(a["lenses"]))
+               .replace("{HEAD}", str(frame["head_sha"])).replace("{FRAME}", frame["id"])
+               .replace("{POLICY}", frame["policy"]["digest"])
+               .replace("{BASIS}", frame["basis"])
+               .replace("{BLOCKING}", "")
+               .replace("{SCHEMA}", json.dumps(schema, ensure_ascii=False, indent=1))
+               .replace("{MATERIAL_TEXT}", "\n".join(sections) or "(none)"))
+    pp = os.path.join(D, f"prompt_{a['reviewer']}.md")
+    open(pp, "w", encoding="utf-8").write(body)
+    return pp, sp, inlined
 
 
 def write_prompt(a, chosen, frame, ev):

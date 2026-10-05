@@ -60,7 +60,10 @@ def main(argv):
         else:
             call = {"provider": provider, "login": login, "route": route, "principal": a.get("principal") or principal}
         member = {"label": a["reviewer"], "steps": [{"kind": "model", **call,
-                                                     "prompt": a["prompt"], "expected": a["expected"]}]}
+                                                     "prompt": a["prompt"], "expected": a["expected"],
+                                                     # a change's review is a query: its answer is
+                                                     # checked against this schema by the stack
+                                                     **({"query": a["schema"]} if a.get("schema") else {})}]}
         # a member that did not produce (a failure or a time-out, never a denial) may be run again,
         # as many times as the project's policy says — the platform counts every attempt
         if int(a.get("retries") or 0) > 0:

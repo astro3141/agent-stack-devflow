@@ -1179,6 +1179,33 @@ def controls_implement():
               (ev2["implementers"]["identities"], ev2["implementers"]["principals"]),
               (["devflow-implementer"], ["devflow-implementer", "devflow-researcher"]))
 
+        # a change's review is a query: materials and schema in the prompt, checked by the stack
+        s.edit(lambda db: set_runs(db, head, build.check_runs()))
+        rq = s.run_pass(good_model, review_mode="model")
+        evq = json.load(open(os.path.join(rq["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
+        aq = next(a for a in evq["assignments"] if a["by"] == "model")
+        body = open(aq["prompt"], encoding="utf-8").read()
+        schema = json.load(open(aq["schema"], encoding="utf-8"))
+        sys.path.insert(0, "/work/stack")
+        import query as stack_query
+        answer = {"head_sha": head, "frame_id": evq["frame"]["id"], "policy_digest": evq["frame"]["policy"]["digest"],
+                  "basis_digest": evq["frame"]["basis"], "lenses": aq["lenses"],
+                  "materials": [{"ref": "diff", "read": True}], "answers": {}, "findings": [],
+                  "unverified": {}, "limits": {}, "verdict": "PASS"}
+        check("a change's review is a query: its materials are in the prompt, with the schema it must answer in",
+              ("# MATERIALS" in body, "checks.json" in body, '"const": "' + head + '"' in body, aq["inlined"][:1]),
+              (True, True, True, ["diff"]))
+        check("the schema uses only what the stack's door checks, and a well-formed answer passes it",
+              (stack_query.unchecked(schema), stack_query.problems(answer, schema)), ([], []))
+        check("and an answer for another head does not",
+              bool(stack_query.problems(dict(answer, head_sha="0" * 40), schema)), True)
+        envq = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(rq["ws"])}
+        step("review_plan.py", ["claude", "claude", "direct", "devflow-reviewer", "research-default", ""], envq)
+        planq = json.load(open(os.path.join(rq["ws"], "devflow", "review_plan.json"), encoding="utf-8"))
+        check("and the fan-out member carries the schema to the door (--query)",
+              all(m["steps"][0].get("query") == next(a["schema"] for a in evq["assignments"] if a["reviewer"] == m["label"])
+                  for m in planq["members"]) and bool(planq["members"]), True)
+
         def green_and_reviewed(db):
             set_runs(db, head, build.check_runs())
             R(db).setdefault("reviews", {})[prn] = [{"id": 900, "user": "rev-person", "commit_id": head, "state": "COMMENTED",
@@ -1468,6 +1495,8 @@ def controls_implement():
         check("one complete review is one model: the lens is not complete until a second model completes it",
               ((r3["state"].get("reviews") or {}).get("status"), any("fewer than 2 different models" in n for n in r3["state"].get("notes") or [])),
               ("incomplete", True))
+        check("a research record's review stays a task (it fetches primary pages; a query has no web)",
+              [a.get("schema") for a in ev2["assignments"]], [None, None])
         check("and the lenses that may read it must read it — it is there",
               ("cited" in ev2["lens_defs"]["base"]["read"], "cited" in ev2["lens_defs"]["research-record"]["read"]), (True, True))
         check("its reviewers are told a finding blocks only when it endangers what the served items need",

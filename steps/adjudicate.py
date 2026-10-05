@@ -71,6 +71,10 @@ def model_reviews(ev, receipt_path):
         doc["reviewer"] = {"kind": "model", "identity": f"devflow-model:{res.get('principal') or 'adapter'}:{res.get('run_id', '')}",
                            "principal": res.get("principal") or "", "session": res.get("run_id", ""),
                            "provider": res.get("provider", ""), "fresh_context": True}
+        if a.get("schema"):
+            # a query was given its materials in its prompt and had no tools: what was put in is
+            # what was read — a fact of the call, not the model's own list of it
+            doc["materials"] = [{"ref": k, "read": True} for k in a.get("inlined") or []]
         # material that was not shown cannot have been read, whatever the review says
         doc["materials"] = [dict(x, read=bool(x.get("read")) and x.get("ref") not in not_shown)
                             for x in doc.get("materials") or []]
