@@ -280,10 +280,11 @@ agents:
            "devflow/research.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
            "devflow-researcher"]
     timeout: 3700
-    # the execution record agent_task.py answers with (agent-stack stack/execution.py, contract 1),
+    # the execution record agent_task.py answers with (agent-stack stack/execution.py, contract 2),
     # copied from docs/packages.md "The output of a model step" — one copy, reused below
     output: &agent_out
       status: {type: string}                 # COMPLETED | FAILED | DENIED | TIMED_OUT | ...
+      kind: {type: string}                   # task (the default) | query
       provider: {type: string}
       principal: {type: string}
       model_route: {type: string}
@@ -303,11 +304,17 @@ agents:
       attempts: {type: number}
       failure: {type: string}
       ledger_error: {type: string}
+      turns: {type: number}
+      tool_calls: {type: number}
+      server_tool_use: {type: number}         # of those, web lookups
+      schema_sha256: {type: string}
+      answer: {type: object}
       measurements:
         type: object
         properties:
           total_tokens: {type: number, required: false}
           wall_ms: {type: number, required: false}
+          model_usage: {type: array, required: false}
     routes:
       - to: deliver
 
