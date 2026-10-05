@@ -321,6 +321,7 @@ def main(argv):
     if rules_changed:
         ev.setdefault("notes", []).append(
             f"the project's rules changed since preparation ({', '.join(rules_changed[:4])}): it is done again")
+    ev["hold_released"] = bool(ev["prepare_only"]) and not (hold.get("task_digest") == task_digest and not rules_changed)
     if hold and hold.get("task_digest") == task_digest and not rules_changed:
         ev["prepare"]["decisions"] += [f"preparation: {d}" for d in hold.get("decisions") or []]
         ev["prepare"]["gaps"] += [f"preparation: {g}" for g in hold.get("gaps") or []]
@@ -440,7 +441,12 @@ def main(argv):
             ev["trace"]["path"] = tpath
         except (remote_mod.RemoteError, dfcore.HookError) as e:
             ev["tool"].append(f"{type(e).__name__}: {e}")
-        if ev["trace"]:
+        if ev["trace"] and ev.get("hold_released"):
+            # the trace on a head that holds only a preparation is that preparation's; its hold is
+            # released (the task or the rules changed), so its open questions are asked again by
+            # the next preparation, not held over from the last one (measured on U-37, #21)
+            ev.setdefault("notes", []).append("the held preparation's trace is not judged: it is prepared again")
+        elif ev["trace"]:
             ev["prepare"]["gaps"] += list(ev["trace"].get("gaps") or [])
             ev["prepare"]["decisions"] += list(ev["trace"].get("decisions") or [])
 

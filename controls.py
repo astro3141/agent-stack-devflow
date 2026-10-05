@@ -1316,7 +1316,9 @@ def controls_implement():
     s = Sim(impl_db())
     try:
         def held(stage, ws):
-            write(ws, ".devflow/tasks/T-0054.yaml", build.TRACE)
+            # like U-37's: the held preparation's own trace leaves a mapping unresolved
+            write(ws, ".devflow/tasks/T-0054.yaml", build.TRACE.replace(
+                "status: confirmed", "status: unresolved\n    open_question: is the FTPS exception observable?"))
             write(ws, ".devflow/tasks/T-0054.research.md", "- open question\n")
             report(ws, "prepare", {"proceed": False, "summary": "needs a decision",
                                    "decisions": ["is the FTPS exception observable?"], "gaps": []})
