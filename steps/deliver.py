@@ -228,7 +228,9 @@ def main(argv):
         dec, gaps = list(prep.get("decisions") or []), list(prep.get("gaps") or [])
         research = research_requests(task, prep)
         hist["prepare_hold"] = {"task_digest": ev.get("task_digest"), "decisions": dec, "gaps": gaps,
-                                "research": research, "head": head}
+                                "research": research, "head": head,
+                                # the canonical head whose rules this preparation answered under
+                                "rules_at": work["canonical"]}
         report["hold"] = "decision" if dec else ("contract_gap" if gaps else "research")
         blockers = ([f"decision: {d}" for d in dec] + [f"contract gap: {g}" for g in gaps]
                     + [f"research needed: {q['id']} — {q.get('question')}" for q in research])

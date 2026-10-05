@@ -1311,6 +1311,42 @@ def controls_implement():
     finally:
         s.close()
 
+    # the project's rules change after a preparation was held: it is prepared again (measured on
+    # U-37: the hook learned to read the criterion PDF, and the hold stood)
+    s = Sim(impl_db())
+    try:
+        def held(stage, ws):
+            write(ws, ".devflow/tasks/T-0054.yaml", build.TRACE)
+            write(ws, ".devflow/tasks/T-0054.research.md", "- open question\n")
+            report(ws, "prepare", {"proceed": False, "summary": "needs a decision",
+                                   "decisions": ["is the FTPS exception observable?"], "gaps": []})
+            return True
+        s.run_pass(held)
+        s.edit(lambda db: set_runs(db, branch_of(db), build.check_runs()))
+        def land(change):
+            def put(db):
+                r = R(db)
+                c = r["branches"][build.CANONICAL]
+                files = dict(r["commits"][c]["files"], **change)
+                new = "c2" + build.sha(json.dumps(files, sort_keys=True))[:38]
+                r["commits"][new] = {"parents": [c], "files": files, "author": "astro3141"}
+                r["branches"][build.CANONICAL] = new
+            return put
+        s.edit(land({"items/kisa/U-02.yaml": "id: U-02\n# elsewhere\n"}))
+        r = s.run_pass(good_model)
+        check("canonical moved, but none of the project's rules: the preparation's hold stands",
+              (verdict(r), r["act"].get("do")), ("NEEDS_DECISION", "none"))
+        s.edit(land({".devflow/instructions/prepare.md": "read the PDF\n"}))
+        before = branch_of(s.db)
+        r = s.run_pass(good_model)
+        check("a rule file changed since preparation: it is prepared again on its branch, and the issue says why",
+              (r["act"].get("do"), r["deliver"].get("delivered"), R(s.db)["commits"][branch_of(s.db)]["parents"],
+               any("rules changed since preparation" in n for n in json.load(open(os.path.join(
+                   r["ws"], "devflow", "evaluation.json"), encoding="utf-8")).get("notes") or [])),
+              ("prepare", "yes", [before], True))
+    finally:
+        s.close()
+
     def needs_research(stage, ws):
         write(ws, ".devflow/tasks/T-0054.yaml", build.TRACE)
         write(ws, ".devflow/tasks/T-0054.research.md", "- which unit vsftpd installs on el8: open\n")

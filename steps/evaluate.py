@@ -99,6 +99,26 @@ def find_pr(rem, task, hist):
     return rem.find_pull(dfcore.task_branch(task))
 
 
+def rules_changed_since(rem, pol, hold, canonical_head, ev):
+    """The project's rule files (its policy, hook, lenses, templates, instructions — `.devflow/` and
+    the policy's rule_paths) that changed on the canonical branch since the hold was prepared; []
+    when none, or when it cannot be told. A hold written before this records where it was prepared
+    in the preparation commit's parent."""
+    at = hold.get("rules_at")
+    try:
+        if not at and hold.get("head"):
+            c = rem.commit(hold["head"])
+            at = (c or {}).get("parents", [None])[0]
+        if not at or at == canonical_head:
+            return []
+        files = rem.changed_files(at, canonical_head)["files"]
+    except remote_mod.RemoteError as e:
+        ev["tool"].append(f"RemoteError: {e}")
+        return []
+    rules = list(pol.get("rule_paths") or [])
+    return sorted(f for f in files if f.startswith(".devflow/") or remote_mod.glob_any(f, rules))
+
+
 ANSWERS = re.compile(r"^\s*(answers|unanswered)\s*:\s*(.+)$", re.M | re.I)
 QID = re.compile(r"Q-[\w.-]*\w")
 
@@ -292,7 +312,16 @@ def main(argv):
     hold = ev["history"].get("prepare_hold") or {}
     # a head that holds only that preparation is not an implementation, whatever its checks say
     ev["prepare_only"] = bool(hold) and bool(pr) and hold.get("head") == pr.get("head_sha")
-    if hold and hold.get("task_digest") == task_digest:
+    # Preparation answers the task under the project's rules as they were; when the rules changed
+    # since (the hook, the instructions, the policy — what preparation read), its questions may be
+    # answered or asked differently now, so it is done again. Measured: U-37 (#21) asked a person to
+    # compare its quotes with the PDF because the hook could not read it; once it could, the hold
+    # stood until the task changed.
+    rules_changed = hold and rules_changed_since(rem, pol, hold, canonical_head, ev)
+    if rules_changed:
+        ev.setdefault("notes", []).append(
+            f"the project's rules changed since preparation ({', '.join(rules_changed[:4])}): it is done again")
+    if hold and hold.get("task_digest") == task_digest and not rules_changed:
         ev["prepare"]["decisions"] += [f"preparation: {d}" for d in hold.get("decisions") or []]
         ev["prepare"]["gaps"] += [f"preparation: {g}" for g in hold.get("gaps") or []]
         # the research the item waits for: a question a merged record answers no longer holds it;
