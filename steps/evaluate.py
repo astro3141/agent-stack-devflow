@@ -31,6 +31,9 @@ PROXY = dfcore.egress_env()
 D = os.path.join(WS, "devflow")
 CACHE = dfcore.state_dir("tree-cache")   # commit trees, kept across runs (requires.state)
 SAFE = re.compile(r"[A-Za-z0-9._-]{1,80}")
+# the longest prompt a brokered call carries (agent-stack stack/profile_runner.py refuses past
+# 200,000 characters), less room for nothing in particular
+QUERY_MAX_CHARS = 190000
 
 
 
@@ -603,6 +606,18 @@ def main(argv):
                 a["expected"] = f"review_{a['reviewer']}.json"
                 if as_query:
                     a["prompt"], a["schema"], a["inlined"] = write_query(a, chosen, frame, ev)
+                    # a brokered call's prompt is bounded (agent-stack profile_runner: 200,000
+                    # characters, refused past that). Measured: a scanner-outcomes review with its
+                    # contracts and implementation inline came to 370 KB and was refused twice.
+                    # Such a review reads its materials with its tools instead.
+                    size = len(open(a["prompt"], encoding="utf-8").read())
+                    limit = int(rv.get("query_max_chars") or QUERY_MAX_CHARS)
+                    if size > limit:
+                        a.pop("schema"), a.pop("inlined")
+                        a["prompt"] = write_prompt(a, chosen, frame, ev)
+                        ev.setdefault("notes", []).append(
+                            f"review {a['reviewer']} reads its materials with tools: inline they come to "
+                            f"{size} characters, past the {limit} a brokered prompt may carry")
                 else:
                     a["prompt"] = write_prompt(a, chosen, frame, ev)
     return done(assignments=assignments)

@@ -105,7 +105,10 @@ def main(argv):
            "tool": ev.get("tool"), "end_point": ev.get("end_point"),
            "violations": ev.get("violations"), "flow": ev.get("flow"), "prepare_only": ev.get("prepare_only"),
            "rework_granted": ev.get("rework_granted"), "reviews_budget_spent": ev.get("reviews_budget_spent"),
-           "lane": ev.get("lane")}
+           "lane": ev.get("lane"),
+           # automatic rework is devflow's own implementer's: a person's change is fixed by its person
+           "auto_rework": str(((ev.get("policy_doc") or {}).get("implement") or {}).get("by") or "human") == "agent"
+                          and str((ev.get("task") or {}).get("implement") or "agent") == "agent"}
     st = dfcore.adjudicate(ctx)
     if ev.get("notes"):
         # what evaluate noticed about the inputs (rules edited by the change, marker comments it

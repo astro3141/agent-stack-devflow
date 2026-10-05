@@ -773,7 +773,9 @@ def adjudicate(ctx):
                 "decision owner", "a decision is recorded, or new evidence is added"))
         max_rework = hist.get("max_rework")
         granted = int(ctx.get("rework_granted") or 0)
-        if max_rework is not None and int(hist.get("rework") or 0) >= int(max_rework) + granted:
+        # the limit bounds devflow's automatic rounds; a person's change has none to count
+        if ctx.get("auto_rework", True) and max_rework is not None \
+                and int(hist.get("rework") or 0) >= int(max_rework) + granted:
             notes.append(f"the automatic rework limit ({max_rework}"
                          + (f", plus {granted} granted" if granted else "") + ") is reached")
             head = str((ctx.get("pr") or {}).get("head_sha") or "")[:12]

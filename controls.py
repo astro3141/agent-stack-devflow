@@ -337,10 +337,27 @@ def controls_flow():
     finally:
         s.close()
 
-    # the rework limit (OPERATING_POLICY: one automatic rework) escalates instead of looping
+    # a person's change has no automatic rounds to count: a second failing head is theirs to fix
+    fail_publish = build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"]) + build.check_runs(["scanner-publish"], "failure")
     s = Sim(build.scanner_pass())
     try:
-        fail_publish = build.check_runs(["scanner-quick", "devflow-policy", "plan-ops", "distro-smoke"]) + build.check_runs(["scanner-publish"], "failure")
+        s.edit(lambda db: set_task(db, implement="human"))
+        s.edit(lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"], fail_publish))
+        s.run()
+        nh = s.edit(lambda db: build.push_new_head(db))
+        s.edit(lambda db: set_runs(db, nh, fail_publish))
+        rh = s.run()
+        check("a person's change failing again: REQUEST_CHANGES for them to fix, not devflow's rework budget (measured on #24)",
+              (verdict(rh), rh["state"]["wait"]["reason"]), ("REQUEST_CHANGES", "implementation"))
+    finally:
+        s.close()
+
+    # the rework limit (OPERATING_POLICY: one automatic rework) bounds devflow's own implementer:
+    # it escalates instead of looping
+    s = Sim(build.scanner_pass())
+    try:
+        s.edit(lambda db: (edit_policy(db, lambda p: p.setdefault("implement", {}).__setitem__("by", "agent")),
+                           set_task(db, implement="agent")))
         s.edit(lambda db: set_runs(db, R(db)["pulls"]["7"]["head_sha"], fail_publish))
         r1 = s.run()
         new = s.edit(lambda db: build.push_new_head(db))
@@ -1205,6 +1222,19 @@ def controls_implement():
         check("and the fan-out member carries the schema to the door (--query)",
               all(m["steps"][0].get("query") == next(a["schema"] for a in evq["assignments"] if a["reviewer"] == m["label"])
                   for m in planq["members"]) and bool(planq["members"]), True)
+        # a review whose materials, inline, are past what a brokered prompt may carry reads them
+        # with its tools instead (measured: a 370 KB query refused by the runner, twice)
+        s.edit(lambda db: edit_policy(db, lambda p: p.setdefault("reviews", {}).__setitem__("query_max_chars", 500),
+                                      head_too=False))
+        rb = s.run_pass(good_model, review_mode="model")
+        evb = json.load(open(os.path.join(rb["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
+        ab = [a for a in evb["assignments"] if a["by"] == "model"]
+        check("a review too large to carry inline is a task review, and the issue says why",
+              ([a.get("schema") for a in ab] == [None] * len(ab) and bool(ab),
+               "# MATERIALS" in open(ab[0]["prompt"], encoding="utf-8").read(),
+               any("reads its materials with tools" in n for n in evb.get("notes") or [])),
+              (True, False, True))
+        s.edit(lambda db: edit_policy(db, lambda p: p["reviews"].pop("query_max_chars", None), head_too=False))
 
         def green_and_reviewed(db):
             set_runs(db, head, build.check_runs())
