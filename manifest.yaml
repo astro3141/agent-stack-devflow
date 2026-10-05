@@ -33,6 +33,11 @@ requires:
   # of a run that may need no model at all.
   # record: every pass ends in stack/steps/record.py.
   capabilities: [tool_rights, egress, record]
+  # A project's hook runs in devflow's runtime; the infra scanner's reads its KISA criterion from
+  # the official PDF with pdfplumber (the reader its CI quote test uses). Without it the hook says
+  # the PDF is not readable and no KISA mapping can be confirmed. The line for the instance's
+  # docker/python/python.local is `packages.py python --candidates`.
+  python: [{import: pdfplumber, dist: "pdfplumber==0.11.10"}]
   # The oldest stack this package was run on (agent-stack docs/packages.md "Moving a package to a
   # newer stack"): the step helper with failure_key, handoff/config roots and egress_hosts; one door
   # through agent_task.py (execution record contract 2); roles.py binding against an admission;
