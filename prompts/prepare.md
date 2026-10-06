@@ -47,11 +47,14 @@ Classification the project's rules gave it so far:
    `provisional` or `unresolved`, with what is missing.
 2. `{REPO}/{RESEARCH_PATH}` — the item analysis, in three stages, in this order:
 
-   **A. What the criterion means** — from the official words and the project's own contracts only;
-   do not read the existing code for this stage.
+   **A. What the criterion means** — from the official criterion, the approved project rules that
+   define what results mean (result states, context, collection failure — where the project's
+   instructions name them), and the task's recorded decisions. The implementation, registries,
+   existing items and precedents are not used to choose a result in this stage, even where the
+   project counts them among its contracts; read them in stage B.
    - **Criterion and scope** — the official version, clause and target; the conditions that decide
      the result; the supported scope.
-   - **Expected results** — per condition, the result the criterion and the contracts give: each
+   - **Expected results** — per condition, the result the criterion and those rules give: each
      outcome derived here, including not applicable, target absent, collection failed and partial
      collection, kept distinct. Where the criterion and an approved project rule (the
      specification, a policy) together give one result, that result is settled here — it is not a
