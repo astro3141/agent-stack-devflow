@@ -400,7 +400,9 @@ agents:
     type: script
     description: The state on the task's issue and the verdict on the head commit (guarded)
     command: "${POC_PY:-/opt/venv/bin/python}"
-    args: ["/work/packages/devflow/steps/publish.py", "{{ workflow.input.project }}"]
+    args: ["/work/packages/devflow/steps/publish.py", "{{ workflow.input.project }}",
+           # the router held devflow's implementer: its words are the wait, not "open a pull request"
+           "{% if route_impl is defined and route_impl.output.decision != 'ROUTE' %}{{ route_impl.output.reason }}{% endif %}"]
     output:
       status: {type: string}
       published: {type: string}
