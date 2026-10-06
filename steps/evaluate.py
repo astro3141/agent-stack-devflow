@@ -604,10 +604,14 @@ def main(argv):
         for l in chosen.values():
             l["read"] = list(l.get("read") or []) + [k for k in l.get("read_if_present") or []
                                                      if k in present and k not in (l.get("read") or [])]
-        # a change's review is a query (agent-stack docs/packages.md "A query"): the materials go in
-        # the prompt, no tools, one turn, and the answer is checked against the review's schema by
-        # the stack. A research record's review keeps its tools — it fetches primary pages to check
-        # the record's attribution, and a query has no web.
+        # A query is a judge, a task an investigator. When every piece of evidence a review needs can
+        # be listed before the call — the lens's materials, closed — it is a query (agent-stack
+        # docs/packages.md "A query": the materials in the prompt, no tools, one turn, the answer
+        # checked against the review's schema by the stack). When finding what evidence is needed is
+        # itself the review, it is a task: a lens that reads the repository, a prompt past what a
+        # brokered call carries, a research record's review (it fetches primary pages). Measured on
+        # #24: lenses that investigate, reviewed as queries, came back unverified with one model and
+        # complete with another; given the repository as tasks, they completed.
         as_query = ev.get("lane") != "research" and str(rv.get("mode") or "query") == "query"
         for a in assignments:
             if a["by"] == "model":

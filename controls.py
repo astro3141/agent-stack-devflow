@@ -1205,6 +1205,12 @@ def controls_implement():
               (ab_.get("schema"), os.path.isfile(os.path.join(rq["ws"], "devflow", "materials", "repository", "tools", "gen.py")),
                evq["materials"].get("repository")),
               (None, True, "repository/"))
+        by_lens = {l: a for a in evq["assignments"] if a["by"] == "model" for l in a["lenses"]}
+        check("a query judges, a task investigates: criteria-trace (does the code reach the condition?) is a task; "
+              "shared-artifact (a closed comparison, with this head's check results) is a query",
+              (bool(by_lens["criteria-trace"].get("schema")), bool(by_lens["shared-artifact"].get("schema")),
+               "checks" in (by_lens["shared-artifact"].get("inlined") or [])),
+              (False, True, True))
         aq = next(a for a in evq["assignments"] if a["by"] == "model" and a.get("schema"))
         body = open(aq["prompt"], encoding="utf-8").read()
         schema = json.load(open(aq["schema"], encoding="utf-8"))
