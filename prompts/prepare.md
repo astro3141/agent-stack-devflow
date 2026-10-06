@@ -45,23 +45,40 @@ Classification the project's rules gave it so far:
    `{REPO}/.devflow/templates/` gives. Every mapping carries its confirmation state honestly:
    `confirmed` only when you compared the official source's own text for it; otherwise
    `provisional` or `unresolved`, with what is missing.
-2. `{REPO}/{RESEARCH_PATH}` — the item analysis. Start from the questions this item must answer
-   (read the official condition first; do not start by collecting everything about the product),
-   then these sections:
+2. `{REPO}/{RESEARCH_PATH}` — the item analysis, in three stages, in this order:
+
+   **A. What the criterion means** — from the official criterion, the approved project rules that
+   define what results mean (result states, context, collection failure — where the project's
+   instructions name them), and the task's recorded decisions. The implementation, registries,
+   existing items and precedents are not used to choose a result in this stage, even where the
+   project counts them among its contracts; read them in stage B.
    - **Criterion and scope** — the official version, clause and target; the conditions that decide
      the result; the supported scope.
+   - **Expected results** — per condition, the result the criterion and those rules give: each
+     outcome derived here, including not applicable, target absent, collection failed and partial
+     collection, kept distinct. Where the criterion and an approved project rule (the
+     specification, a policy) together give one result, that result is settled here — it is not a
+     decision for a person, whatever existing code or earlier items do.
+
+   **B. Whether the current contracts can express it** — now read the code the item would be
+   observed and judged through.
    - **Facts relied on** — each fact with where it comes from (a merged research record and its
-     line, or a repository file and line at `{CANONICAL}`) and the conditions it holds under; the
-     questions still open and what each affects. Keep fact, observation (code read, a run: with its
-     environment and SHA), inference and unverified apart.
+     line, or a repository file and line at `{CANONICAL}`) and the conditions it holds under. Keep
+     fact, observation (code read, a run: with its environment and SHA), inference and unverified apart.
    - **Mapping** — per condition: official condition → observation needed → Evidence →
-     Primitive/Check → Binding/Item → expected result, by meaning rather than by name.
-   - **Exceptional outcomes** — not applicable, target absent, collection failed, partial
-     collection: kept distinct, each mapped to a real state of the contracts.
-   - **Implementation plan** — what changes, who consumes it, what is reused and why, whether a
-     Foundation change is needed.
-   - **Verification plan** — normal, boundary and failure cases, with expected results derived from
-     the criterion and the contracts — never copied from what the current code outputs.
+     Primitive/Check → Binding/Item → the result stage A derived, by meaning rather than by name.
+   - Where the existing code gives a different result than stage A, or cannot observe what the
+     criterion observes, that is a **gap** (a contract that has to change) or a defect of the
+     code — never a reason to ask a person which result to accept.
+   - **If a gap blocks the item, stop here**: write the gap with its evidence and what the
+     contract would need, and do not write an implementation or verification plan for a contract
+     that does not exist yet. The item is prepared again once the gap is closed.
+
+   **C. Implementation** — only when stage B found no blocking gap.
+   - **Implementation plan** — what changes, who consumes it, what is reused and why.
+   - **Verification plan** — normal, boundary and failure cases, with expected results from stage
+     A — never copied from what the current code outputs.
+
    Where reference material observes something the mapping does not, say so and whether it
    matters. Reference material is evidence of how something was collected before; never the criterion.
 3. `{OUT}` — JSON:
@@ -83,7 +100,18 @@ Classification the project's rules gave it so far:
 ```
 
 `proceed` is false when anything in `decisions`, `gaps` or `research` must be settled before an
-implementation could be judged correct. Ask research only for what decides this item's result;
+implementation could be judged correct. Each open point goes to exactly one of them:
+
+- `decisions` — only where the official text, read together with the approved project rules,
+  still leaves two meanings that would give different results. A difference between the criterion
+  and existing code, an earlier item, or a precedent is not a decision; neither is a contract that
+  cannot express the result.
+- `gaps` — what the current contracts cannot observe or express. The same point is never both a
+  gap and a decision (no "accept the wrong result until the gap is closed?").
+- `research` — a fact about the systems that no merged record establishes and that changes this
+  item's result.
+
+Ask research only for what decides this item's result;
 a question that changes nothing here is left as a follow-up in the analysis. Do not narrow the
 supported scope to make a question go away. Do not guess past such a point, and do not invent
 certainty: an unresolved question stated plainly is a correct preparation.
