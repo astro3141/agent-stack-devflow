@@ -469,9 +469,25 @@ def main(argv):
                     "artifact": a, "base_text": base_text, "head_text": head_text, "task_doc": expected_doc})
                 detail.append({"artifact": a["id"], **{k: got.get(k) for k in ("match", "actual", "expected", "diff")}})
                 match = match and bool(got.get("match"))
+            # what a reviewer needs to judge "regenerated on the latest canonical head, in the
+            # confirmed order" without looking anywhere else (shared-artifact is a query): which
+            # canonical head this head contains, which of this head's checks regenerated and
+            # verified the artifact (the policy's `verified_by`), and how merges onto it are ordered
+            results = (ev.get("checks") or {}).get("results") or {}
+            regen = {a["id"]: {c: (results.get(c) or {}).get("result", "NOT_RUN") for c in a.get("verified_by") or []}
+                     for a in affected}
+            order = {}
+            for a in affected:
+                lock = a.get("lock", a["id"])
+                order[a["id"]] = {"lock": f"refs/devflow/lock/{lock}", "held_by": rem.ref(f"refs/devflow/lock/{lock}"),
+                                  "rule": "changes to this artifact merge one at a time: devflow takes the lock for a "
+                                          "head at integration and releases it when that head is merged or replaced"}
             ev["shared"] = {"required": True, "rebased": rebased, "ops_match": match if rebased else None,
                             "artifacts": [a["id"] for a in affected], "lock": [a.get("lock", a["id"]) for a in affected],
-                            "detail": detail}
+                            "detail": detail,
+                            "canonical_branch": reg["canonical_branch"], "canonical_head": canonical_head,
+                            "head_sha": pr["head_sha"], "head_contains_canonical_head": rebased,
+                            "regenerated_by": regen or None, "order": order}
         except (remote_mod.RemoteError, dfcore.HookError) as e:
             ev["tool"].append(f"{type(e).__name__}: {e}")
             ev["shared"] = {"required": True, "rebased": False, "ops_match": None}

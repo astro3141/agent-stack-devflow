@@ -1211,6 +1211,12 @@ def controls_implement():
               (bool(by_lens["criteria-trace"].get("schema")), bool(by_lens["shared-artifact"].get("schema")),
                "checks" in (by_lens["shared-artifact"].get("inlined") or [])),
               (False, True, True))
+        ops = json.load(open(os.path.join(rq["ws"], "devflow", "materials", "artifact_ops.json"), encoding="utf-8"))
+        check("and its packet says which canonical head the change sits on, what regenerated it and how merges are ordered "
+              "(measured on #24: without these the query declared 'regenerated' unverified)",
+              (ops.get("canonical_head") == R(s.db)["branches"][build.CANONICAL], ops.get("head_contains_canonical_head"),
+               "regenerated_by" in ops, sorted((ops.get("order") or {}).get("collection-plan", {}))),
+              (True, True, True, ["held_by", "lock", "rule"]))
         aq = next(a for a in evq["assignments"] if a["by"] == "model" and a.get("schema"))
         body = open(aq["prompt"], encoding="utf-8").read()
         schema = json.load(open(aq["schema"], encoding="utf-8"))
