@@ -1,6 +1,6 @@
 """devflow step: put the task's state where the task lives — on GitHub.
 
-usage: publish.py <project>
+usage: publish.py <project> [<why devflow's implementer could not start>]
 
 Two effects, both on the remote, both guarded:
 
@@ -44,6 +44,16 @@ def main(argv):
         step.out(**{"status": "TOOL_FAILURE", "published": "no", "evidence_index": "", "error": "no state for this run"})
         return 0
     st = json.load(open(sp, encoding="utf-8"))
+    held = argv[1].strip() if len(argv) > 1 and argv[1] else ""
+    if held:
+        # act sent the task to devflow's implementer and the router held it (a login expired, a
+        # provider over its limit): the wait is the environment's, in the router's words — not
+        # "open a pull request", which is what adjudicate says when nobody is implementing
+        # (measured on infra-scanner-io#26: the expired login was nowhere on the issue)
+        st["wait"] = {"reason": "environment", "need": f"devflow's implementer could not start: {held}"[:400],
+                      "owner": "operator", "resume_when": "a pass after the implementer's provider is eligible again"}
+        st["next"] = st["wait"]["need"]
+        json.dump(st, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     frame = st.get("frame") or {}
     # what the issue has to carry: the verdict, and also what was spent and taken — a pass that only
     # added a review on the same head (same verdict, same blockers) still counted its model calls
@@ -53,7 +63,8 @@ def main(argv):
     pub_key = dfcore.sha256(dfcore.canon([frame.get("id"), st["phase"], st.get("verdict"), st.get("progress"),
                                           st.get("blockers"), (st.get("wait") or {}).get("reason"),
                                           {k: v for k, v in hist.items() if k != "last_blocking"},
-                                          [a.get("sha256") for a in st.get("accepted_reviews") or []]]))[:16]
+                                          [a.get("sha256") for a in st.get("accepted_reviews") or []],
+                                          (st.get("wait") or {}).get("need") if held else None]))[:16]
     st.setdefault("ops", {})
     did, skipped, err = [], [], ""
     try:

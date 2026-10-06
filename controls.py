@@ -834,6 +834,13 @@ def controls_evidence():
         body = next(c["body"] for c in R(s.db)["issues"]["3"]["comments"] if "devflow:state" in c["body"])
         check("same verdict, one more model call: the comment is updated and carries it",
               ("updated" in (more.get("did") or ""), f'"model_calls":{st["history"]["model_calls"]}' in body), (True, True))
+        # the router held devflow's implementer (#26: an expired login): the issue says so
+        held = step("publish.py", ["scanner-fixture", "no eligible provider: claude=unknown: the login's token expired"], env)
+        body = next(c["body"] for c in R(s.db)["issues"]["3"]["comments"] if "devflow:state" in c["body"])
+        check("the implementer held by the router: the wait is the environment's, in the router's words",
+              ("updated" in (held.get("did") or ""), "waiting (environment): devflow's implementer could not start: "
+               "no eligible provider: claude=unknown: the login's token expired" in body, "open a pull request" in body),
+              (True, True, False))
     finally:
         s.close()
 
