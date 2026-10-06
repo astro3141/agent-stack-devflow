@@ -105,7 +105,9 @@ lenses:
     # (measured on #24: without checks it could not say the artifact was regenerated)
     read: [diff, task, artifact_ops, checks]
     questions:
-      - {id: regenerated, q: "Was the artifact regenerated on the latest canonical head, in the confirmed order?"}
+      # the order merges land in is held by devflow's integration lock, taken after the verdict — not
+      # something a review can see before it (measured on #24: asked, the review declared it unverified)
+      - {id: regenerated, q: "Was the artifact regenerated and verified on a head that contains the latest canonical head? (The order of merges onto it is devflow's integration lock, not this review's.)"}
       - {id: ops, q: "Does the actual operation difference equal the expected set, and is every difference explained?"}
       - {id: counts, q: "Did count expectations change only as a consequence of expected operations — never to match output?"}
     submit: [basis.kind, basis.ref, claim, evidence]

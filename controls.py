@@ -1201,23 +1201,25 @@ def controls_implement():
         rq = s.run_pass(good_model, review_mode="model")
         evq = json.load(open(os.path.join(rq["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
         ab_ = next(a for a in evq["assignments"] if a["by"] == "model" and "base" in a["lenses"])
-        check("the base review reads the repository: a task review, with the tree of exactly the head in its materials",
-              (ab_.get("schema"), os.path.isfile(os.path.join(rq["ws"], "devflow", "materials", "repository", "tools", "gen.py")),
+        check("the base review reads the repository: it investigates with tools, with the tree of exactly the head in its materials",
+              (bool(ab_.get("closed")), os.path.isfile(os.path.join(rq["ws"], "devflow", "materials", "repository", "tools", "gen.py")),
                evq["materials"].get("repository")),
-              (None, True, "repository/"))
+              (False, True, "repository/"))
         by_lens = {l: a for a in evq["assignments"] if a["by"] == "model" for l in a["lenses"]}
-        check("a query judges, a task investigates: criteria-trace (does the code reach the condition?) is a task; "
-              "shared-artifact (a closed comparison, with this head's check results) is a query",
-              (bool(by_lens["criteria-trace"].get("schema")), bool(by_lens["shared-artifact"].get("schema")),
+        check("a judge or an investigator: criteria-trace (does the code reach the condition?) investigates; "
+              "shared-artifact (a closed comparison, with this head's check results) judges closed",
+              (bool(by_lens["criteria-trace"].get("closed")), bool(by_lens["shared-artifact"].get("closed")),
                "checks" in (by_lens["shared-artifact"].get("inlined") or [])),
               (False, True, True))
+        check("and every review, judge or investigator, carries its schema (--output-schema, agent-stack §102)",
+              all(a.get("schema") for a in evq["assignments"] if a["by"] == "model"), True)
         ops = json.load(open(os.path.join(rq["ws"], "devflow", "materials", "artifact_ops.json"), encoding="utf-8"))
         check("and its packet says which canonical head the change sits on, what regenerated it and how merges are ordered "
               "(measured on #24: without these the query declared 'regenerated' unverified)",
               (ops.get("canonical_head") == R(s.db)["branches"][build.CANONICAL], ops.get("head_contains_canonical_head"),
                "regenerated_by" in ops, sorted((ops.get("order") or {}).get("collection-plan", {}))),
               (True, True, True, ["held_by", "lock", "rule"]))
-        aq = next(a for a in evq["assignments"] if a["by"] == "model" and a.get("schema"))
+        aq = next(a for a in evq["assignments"] if a["by"] == "model" and a.get("closed"))
         body = open(aq["prompt"], encoding="utf-8").read()
         schema = json.load(open(aq["schema"], encoding="utf-8"))
         sys.path.insert(0, "/work/stack")
@@ -1236,9 +1238,12 @@ def controls_implement():
         envq = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(rq["ws"])}
         step("review_plan.py", ["claude", "claude", "direct", "devflow-reviewer", "research-default", ""], envq)
         planq = json.load(open(os.path.join(rq["ws"], "devflow", "review_plan.json"), encoding="utf-8"))
-        check("and the fan-out member carries the schema to the door (--query)",
-              all(m["steps"][0].get("query") == next(a.get("schema") for a in evq["assignments"] if a["reviewer"] == m["label"])
-                  for m in planq["members"]) and any(m["steps"][0].get("query") for m in planq["members"]), True)
+        want = {a["reviewer"]: a for a in evq["assignments"] if a["by"] == "model"}
+        check("and each fan-out member carries its schema to the door; a judge runs in the closed profile",
+              sorted((m["label"], m["steps"][0].get("schema") == want[m["label"]]["schema"],
+                      m["steps"][0].get("profile") == ("closed" if want[m["label"]].get("closed") else None))
+                     for m in planq["members"]),
+              sorted((l, True, True) for l in want))
         # a review whose materials, inline, are past what a brokered prompt may carry reads them
         # with its tools instead (measured: a 370 KB query refused by the runner, twice)
         s.edit(lambda db: edit_policy(db, lambda p: p.setdefault("reviews", {}).__setitem__("query_max_chars", 500),
@@ -1247,7 +1252,7 @@ def controls_implement():
         evb = json.load(open(os.path.join(rb["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
         ab = [a for a in evb["assignments"] if a["by"] == "model"]
         check("a review too large to carry inline is a task review, and the issue says why",
-              ([a.get("schema") for a in ab] == [None] * len(ab) and bool(ab),
+              ([a.get("closed") for a in ab] == [None] * len(ab) and bool(ab),
                "# MATERIALS" in open(ab[0]["prompt"], encoding="utf-8").read(),
                any("reads its materials with tools" in n for n in evb.get("notes") or [])),
               (True, False, True))
@@ -1580,8 +1585,8 @@ def controls_implement():
         check("one complete review is one model: the lens is not complete until a second model completes it",
               ((r3["state"].get("reviews") or {}).get("status"), any("fewer than 2 different models" in n for n in r3["state"].get("notes") or [])),
               ("incomplete", True))
-        check("a research record's review stays a task (it fetches primary pages; a query has no web)",
-              [a.get("schema") for a in ev2["assignments"]], [None, None])
+        check("a research record's review investigates with tools (it fetches primary pages; a closed call has no web)",
+              [a.get("closed") for a in ev2["assignments"]], [None, None])
         check("and the lenses that may read it must read it — it is there",
               ("cited" in ev2["lens_defs"]["base"]["read"], "cited" in ev2["lens_defs"]["research-record"]["read"]), (True, True))
         check("its reviewers are told a finding blocks only when it endangers what the served items need",

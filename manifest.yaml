@@ -42,7 +42,7 @@ requires:
   # newer stack"): the step helper with failure_key, handoff/config roots and egress_hosts; one door
   # through agent_task.py (execution record contract 2); roles.py binding against an admission;
   # requires.state in both places.
-  stack: {min: 7515eab}
+  stack: {min: 826536e}
   state:
     # A task's state lives with the work: one comment on the task's GitHub issue, edited in place —
     # a sentence for people, and for the next pass the counters (budgets, rounds, reworks),

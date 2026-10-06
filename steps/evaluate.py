@@ -620,22 +620,25 @@ def main(argv):
         for l in chosen.values():
             l["read"] = list(l.get("read") or []) + [k for k in l.get("read_if_present") or []
                                                      if k in present and k not in (l.get("read") or [])]
-        # A query is a judge, a task an investigator. When every piece of evidence a review needs can
-        # be listed before the call — the lens's materials, closed — it is a query (agent-stack
-        # docs/packages.md "A query": the materials in the prompt, no tools, one turn, the answer
-        # checked against the review's schema by the stack). When finding what evidence is needed is
-        # itself the review, it is a task: a lens that reads the repository, a prompt past what a
-        # brokered call carries, a research record's review (it fetches primary pages). Measured on
-        # #24: lenses that investigate, reviewed as queries, came back unverified with one model and
-        # complete with another; given the repository as tasks, they completed.
-        as_query = ev.get("lane") != "research" and str(rv.get("mode") or "query") == "query"
+        # A judge or an investigator. When every piece of evidence a review needs can be listed
+        # before the call — the lens's materials, closed — it is a judge: the materials in the
+        # prompt, a closed call (the stack's `closed` execution profile: no tools, one turn). When
+        # finding what evidence is needed is itself the review, it is an investigator with tools: a
+        # lens that reads the repository, a prompt past what a brokered call carries, a research
+        # record's review (it fetches primary pages). Either way the answer is the review's schema,
+        # checked by the stack (--output-schema, agent-stack §102). Measured on #24: lenses that
+        # investigate, judged closed, came back unverified with one model and complete with another;
+        # given the repository with tools, they completed.
+        judges = ev.get("lane") != "research" and str(rv.get("mode") or "query") == "query"
         for a in assignments:
             if a["by"] == "model":
                 a["expected"] = f"review_{a['reviewer']}.json"
-                # a lens that reads the repository reads code it needs with tools: a task review
+                a["schema"] = write_schema(a, chosen, frame)
+                # a lens that reads the repository reads the code it needs with tools
                 browses = any("repository" in (chosen[l].get("read") or []) for l in a["lenses"])
-                if as_query and not browses:
-                    a["prompt"], a["schema"], a["inlined"] = write_query(a, chosen, frame, ev)
+                if judges and not browses:
+                    a["prompt"], a["inlined"] = write_query(a, chosen, frame, ev)
+                    a["closed"] = True
                     # a brokered call's prompt is bounded (agent-stack profile_runner: 200,000
                     # characters, refused past that). Measured: a scanner-outcomes review with its
                     # contracts and implementation inline came to 370 KB and was refused twice.
@@ -643,7 +646,7 @@ def main(argv):
                     size = len(open(a["prompt"], encoding="utf-8").read())
                     limit = int(rv.get("query_max_chars") or QUERY_MAX_CHARS)
                     if size > limit:
-                        a.pop("schema"), a.pop("inlined")
+                        a.pop("closed"), a.pop("inlined")
                         a["prompt"] = write_prompt(a, chosen, frame, ev)
                         ev.setdefault("notes", []).append(
                             f"review {a['reviewer']} reads its materials with tools: inline they come to "
@@ -827,10 +830,18 @@ def review_schema(a, chosen, frame):
     }
 
 
+def write_schema(a, chosen, frame):
+    """The review's answer contract, as a file: the door checks every model review against it
+    (--output-schema), whether the review judges closed or investigates with tools."""
+    sp = os.path.join(D, f"schema_{a['reviewer']}.json")
+    json.dump(review_schema(a, chosen, frame), open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    return sp
+
+
 def write_query(a, chosen, frame, ev):
-    """The review as a query: the instructions, the review's schema, and every material its lenses
-    read, inline. Returns (prompt path, schema path, the material kinds put in the prompt) — what
-    was put in is what was read, whatever the answer lists (adjudicate.py)."""
+    """A closed review (a judge): the instructions, the review's schema, and every material its
+    lenses read, inline. Returns (prompt path, the material kinds put in the prompt) — what was
+    put in is what was read, whatever the answer lists (adjudicate.py)."""
     m = os.path.join(D, "materials")
     index = ev.get("materials") or {}
     kinds = []
@@ -856,8 +867,6 @@ def write_query(a, chosen, frame, ev):
         sections.append("## not_shown\n\n" + "\n".join(f"- {x['ref']} ({x['bytes']} bytes > {x['limit']})"
                                                          for x in index["not_shown"]) + "\n")
     schema = review_schema(a, chosen, frame)
-    sp = os.path.join(D, f"schema_{a['reviewer']}.json")
-    json.dump(schema, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     lens_text = []
     for lid in a["lenses"]:
         l = chosen[lid]
@@ -874,7 +883,7 @@ def write_query(a, chosen, frame, ev):
                .replace("{MATERIAL_TEXT}", "\n".join(sections) or "(none)"))
     pp = os.path.join(D, f"prompt_{a['reviewer']}.md")
     open(pp, "w", encoding="utf-8").write(body)
-    return pp, sp, inlined
+    return pp, inlined
 
 
 def write_prompt(a, chosen, frame, ev):
