@@ -29,7 +29,11 @@ schema: devflow/lenses@1
 
 base:
   title: Base review
-  read: [diff, task, checks]
+  # `repository`: the tree of exactly the head commit, read where a question needs it — the code
+  # paths the change relies on but does not change. A lens that reads it is reviewed with tools, not
+  # as a query (measured: a query base review could not answer boundaries/errors for code it was
+  # not given, and pasting the code inline does not fit a brokered prompt).
+  read: [diff, task, checks, repository]
   read_if_present: [cited]           # repository files a changed document cites, as the head has them
   questions:
     - {id: function, q: "Does the change do what the task's completion criteria say — each criterion with evidence, not with a command's exit code?"}

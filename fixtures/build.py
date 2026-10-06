@@ -151,7 +151,7 @@ def basis_of(files):
     return dfcore.sha256(dfcore.canon(blobs))[:12]
 
 
-def review_body(head, lenses, reads=("diff", "task", "checks", "trace", "criteria", "contracts", "implementation", "artifact_ops"),
+def review_body(head, lenses, reads=("diff", "task", "checks", "repository", "trace", "criteria", "contracts", "implementation", "artifact_ops"),
                 verdict="PASS", findings=(), unverified=None, digest=None, basis=None, limits=None):
     qs = lens_questions()
     doc = {"head_sha": head, "policy_digest": digest or policy_digest(),

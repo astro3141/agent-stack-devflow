@@ -1200,7 +1200,12 @@ def controls_implement():
         s.edit(lambda db: set_runs(db, head, build.check_runs()))
         rq = s.run_pass(good_model, review_mode="model")
         evq = json.load(open(os.path.join(rq["ws"], "devflow", "evaluation.json"), encoding="utf-8"))
-        aq = next(a for a in evq["assignments"] if a["by"] == "model")
+        ab_ = next(a for a in evq["assignments"] if a["by"] == "model" and "base" in a["lenses"])
+        check("the base review reads the repository: a task review, with the tree of exactly the head in its materials",
+              (ab_.get("schema"), os.path.isfile(os.path.join(rq["ws"], "devflow", "materials", "repository", "tools", "gen.py")),
+               evq["materials"].get("repository")),
+              (None, True, "repository/"))
+        aq = next(a for a in evq["assignments"] if a["by"] == "model" and a.get("schema"))
         body = open(aq["prompt"], encoding="utf-8").read()
         schema = json.load(open(aq["schema"], encoding="utf-8"))
         sys.path.insert(0, "/work/stack")
@@ -1210,7 +1215,7 @@ def controls_implement():
                   "materials": [{"ref": "diff", "read": True}], "answers": {}, "findings": [],
                   "unverified": {}, "limits": {}, "verdict": "PASS"}
         check("a change's review is a query: its materials are in the prompt, with the schema it must answer in",
-              ("# MATERIALS" in body, "checks.json" in body, '"const": "' + head + '"' in body, aq["inlined"][:1]),
+              ("# MATERIALS" in body, "## diff:" in body, '"const": "' + head + '"' in body, aq["inlined"][:1]),
               (True, True, True, ["diff"]))
         check("the schema uses only what the stack's door checks, and a well-formed answer passes it",
               (stack_query.unchecked(schema), stack_query.problems(answer, schema)), ([], []))
@@ -1220,8 +1225,8 @@ def controls_implement():
         step("review_plan.py", ["claude", "claude", "direct", "devflow-reviewer", "research-default", ""], envq)
         planq = json.load(open(os.path.join(rq["ws"], "devflow", "review_plan.json"), encoding="utf-8"))
         check("and the fan-out member carries the schema to the door (--query)",
-              all(m["steps"][0].get("query") == next(a["schema"] for a in evq["assignments"] if a["reviewer"] == m["label"])
-                  for m in planq["members"]) and bool(planq["members"]), True)
+              all(m["steps"][0].get("query") == next(a.get("schema") for a in evq["assignments"] if a["reviewer"] == m["label"])
+                  for m in planq["members"]) and any(m["steps"][0].get("query") for m in planq["members"]), True)
         # a review whose materials, inline, are past what a brokered prompt may carry reads them
         # with its tools instead (measured: a 370 KB query refused by the runner, twice)
         s.edit(lambda db: edit_policy(db, lambda p: p.setdefault("reviews", {}).__setitem__("query_max_chars", 500),

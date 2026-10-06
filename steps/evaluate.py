@@ -590,6 +590,14 @@ def main(argv):
     if any(a["by"] == "model" for a in assignments):
         try:
             write_materials(rem, pol, hook_root, task, pr, changed, frame, crit, ev)
+            # a lens that reads the repository gets the tree of exactly the judged head, frozen in
+            # the materials like the rest: read where its questions need it, never pasted inline
+            reads = {k for a in assignments if a["by"] == "model" for l in a["lenses"] for k in chosen[l].get("read") or []}
+            if "repository" in reads:
+                refs.copy_tree(refs.cached_tree(rem, pr["head_sha"], CACHE, RUN), os.path.join(D, "materials", "repository"))
+                ev["materials"]["repository"] = "repository/"
+                json.dump(ev["materials"], open(os.path.join(D, "materials", "index.json"), "w", encoding="utf-8"),
+                          ensure_ascii=False, indent=1)
         except (remote_mod.RemoteError, dfcore.HookError) as e:
             ev["tool"].append(f"{type(e).__name__}: {e}")
         present = {k for k, v in (ev.get("materials") or {}).items() if v and k not in ("not_shown", "criteria_notes")}
@@ -604,7 +612,9 @@ def main(argv):
         for a in assignments:
             if a["by"] == "model":
                 a["expected"] = f"review_{a['reviewer']}.json"
-                if as_query:
+                # a lens that reads the repository reads code it needs with tools: a task review
+                browses = any("repository" in (chosen[l].get("read") or []) for l in a["lenses"])
+                if as_query and not browses:
                     a["prompt"], a["schema"], a["inlined"] = write_query(a, chosen, frame, ev)
                     # a brokered call's prompt is bounded (agent-stack profile_runner: 200,000
                     # characters, refused past that). Measured: a scanner-outcomes review with its
