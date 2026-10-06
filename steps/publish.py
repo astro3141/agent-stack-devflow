@@ -45,8 +45,15 @@ def main(argv):
         return 0
     st = json.load(open(sp, encoding="utf-8"))
     frame = st.get("frame") or {}
+    # what the issue has to carry: the verdict, and also what was spent and taken — a pass that only
+    # added a review on the same head (same verdict, same blockers) still counted its model calls
+    # and its round, and a key without them called that "already written" (measured on #24: the
+    # judge's single call was left out of the budget)
+    hist = st.get("history") or {}
     pub_key = dfcore.sha256(dfcore.canon([frame.get("id"), st["phase"], st.get("verdict"), st.get("progress"),
-                                          st.get("blockers"), (st.get("wait") or {}).get("reason")]))[:16]
+                                          st.get("blockers"), (st.get("wait") or {}).get("reason"),
+                                          {k: v for k, v in hist.items() if k != "last_blocking"},
+                                          [a.get("sha256") for a in st.get("accepted_reviews") or []]]))[:16]
     st.setdefault("ops", {})
     did, skipped, err = [], [], ""
     try:

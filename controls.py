@@ -816,6 +816,27 @@ def controls_evidence():
     finally:
         s.close()
 
+    # what a pass spent is published even when the verdict did not change: the key that says
+    # "already written" covers the history and the reviews taken, not only the verdict (#24: a pass
+    # that added one judge's review on the same head left its call out of the budget)
+    s = Sim(copy.deepcopy(base))
+    try:
+        r = s.run(review_mode="model")
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": os.path.basename(r["ws"])}
+        again = step("publish.py", ["scanner-fixture"], env)
+        check("the same state published again is not written again", "already says this" in (again.get("skipped") or ""), True)
+        sp = os.path.join(r["ws"], "devflow", "state.json")
+        st = json.load(open(sp, encoding="utf-8"))
+        st["history"]["model_calls"] = int(st["history"].get("model_calls") or 0) + 1
+        st["history"]["review_rounds"] = int(st["history"].get("review_rounds") or 0) + 1
+        json.dump(st, open(sp, "w", encoding="utf-8"))
+        more = step("publish.py", ["scanner-fixture"], env)
+        body = next(c["body"] for c in R(s.db)["issues"]["3"]["comments"] if "devflow:state" in c["body"])
+        check("same verdict, one more model call: the comment is updated and carries it",
+              ("updated" in (more.get("did") or ""), f'"model_calls":{st["history"]["model_calls"]}' in body), (True, True))
+    finally:
+        s.close()
+
 
 # ================================================================================== shared
 def controls_shared():
