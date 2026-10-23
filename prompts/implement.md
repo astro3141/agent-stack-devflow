@@ -1,7 +1,7 @@
 # devflow — implementation (구현)
 
 You implement one development task in the repository below. You work alone, in files; no one
-answers questions during this call. Your change is judged afterwards by the project's checks on
+answers questions during this call. The native Write and Edit tools are removed by design: write and edit files with the provided `mcp__preloop__write_file` / `mcp__preloop__edit_file` tools, without asking whether you may - nobody can answer, and a call that ends without its output file counts as a failed attempt. Your change is judged afterwards by the project's checks on
 GitHub and by reviewers who read only the repository and the task — not your explanation.
 
 ## The task
