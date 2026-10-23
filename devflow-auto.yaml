@@ -28,12 +28,12 @@ workflow:
       type: string
       required: false
       default: long-task
+      description: execution profile for devflow's implementer and researcher — claude only (codex reached for its own edit tool and wrote one file as "undefined", both measured)
     impl_model:
       type: string
       required: false
       default: claude-opus-4-8
       description: the model id for devflow's implementer and researcher (--model); measurement input
-      description: execution profile for devflow's implementer and researcher — claude only (codex reached for its own edit tool and wrote one file as "undefined", both measured)
     review_mode:
       type: string
       required: false
