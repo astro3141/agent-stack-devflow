@@ -28,6 +28,11 @@ workflow:
       type: string
       required: false
       default: long-task
+    impl_model:
+      type: string
+      required: false
+      default: claude-opus-4-8
+      description: the model id for devflow's implementer and researcher (--model); measurement input
       description: execution profile for devflow's implementer and researcher — claude only (codex reached for its own edit tool and wrote one file as "undefined", both measured)
     review_mode:
       type: string
@@ -60,7 +65,8 @@ agents:
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/drive.py", "{{ workflow.input.project }}", "{{ workflow.input.issue }}",
            "{{ workflow.input.profile }}", "{{ workflow.input.impl_profile }}", "{{ workflow.input.review_mode }}",
-           "{{ workflow.input.max_passes }}", "{{ workflow.input.poll_s }}", "{{ workflow.input.max_wait_s }}"]
+           "{{ workflow.input.max_passes }}", "{{ workflow.input.poll_s }}", "{{ workflow.input.max_wait_s }}",
+           "{{ workflow.input.impl_model }}"]
     timeout: 43000
     output:
       status: {type: string}

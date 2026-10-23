@@ -1,6 +1,6 @@
 """devflow step: run passes over one task, one after another, until the next move is not devflow's.
 
-usage: drive.py <project> <issue> <profile> <impl_profile> <review_mode> <max_passes> <poll_s> <max_wait_s>
+usage: drive.py <project> <issue> <profile> <impl_profile> <review_mode> <max_passes> <poll_s> <max_wait_s> [impl_model]
 
 Each pass is an ordinary `devflow` run (its own run id, its own record, its own published state);
 this step only decides whether to start the next one, from what the last one published:
@@ -55,9 +55,11 @@ def settle(project, head, poll_s, budget_s, sleep=time.sleep):
 
 
 
-def one_pass(run_id, project, issue, profile, impl_profile, review_mode):
+def one_pass(run_id, project, issue, profile, impl_profile, review_mode, impl_model=""):
     args = RUNNER + ["start", run_id, "devflow", profile, f"project={project}", f"issue={issue}",
                      f"review_mode={review_mode}", f"impl_profile={impl_profile}"]
+    if impl_model:
+        args.append(f"impl_model={impl_model}")
     subprocess.run(args, capture_output=True, text=True, timeout=3 * 3600)
     shown = subprocess.run(RUNNER + ["show", run_id], capture_output=True, text=True, timeout=60)
     try:
@@ -112,12 +114,13 @@ def decide(p, prev, waited, max_wait):
 
 def main(argv):
     project, issue, profile, impl_profile, review_mode = argv[:5]
+    impl_model = argv[8] if len(argv) > 8 else ""
     max_passes, poll_s, max_wait = int(argv[5]), int(argv[6]), int(argv[7])
     passes, prev, why = [], None, ""
     held = 0                                  # how long reviews have waited for an eligible provider
     for n in range(1, max_passes + 1):
         run_id = re.sub(r"[^a-z0-9-]", "-", f"{PARENT[:24]}-p{n}".lower())
-        p = one_pass(run_id, project, issue, profile, impl_profile, review_mode)
+        p = one_pass(run_id, project, issue, profile, impl_profile, review_mode, impl_model)
         passes.append(p)
         go, ci, why = decide(p, prev, held, max_wait)
         if not go:
