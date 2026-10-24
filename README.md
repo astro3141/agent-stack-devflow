@@ -239,3 +239,7 @@ docker exec cadp278-agent /opt/venv/bin/python /work/packages/devflow/fixtures/b
 설정표, 작업 템플릿; CADP Review Lens Library (lenses marked `cadp-*`, conditional) — Notion,
 read 2026-09-25. The CADP library's "Spec > TD > Trace" is not used as a rule over execution
 observations, and its K2/K4/K7 grades are not carried into common rules (`lenses/library.yaml`).
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE). Copyright 2026 astro3141.
