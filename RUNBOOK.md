@@ -103,8 +103,9 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 
 | command | effect |
 |---|---|
-| `/devflow approve <gate> <task digest>` | a gate bound to the task (e.g. `gate1`, `criterion`) |
-| `/devflow approve <gate> <head sha>` | a gate bound to a head (e.g. `gate2`) |
+| `/devflow approve <gate> <task digest>` | a gate bound only to the task (for policies that explicitly use `binds: task`) |
+| `/devflow approve <gate> <proposal digest>` | a proposal gate bound to the exact task plus canonical policy/workflow/hook and any configured operational-control blobs; use this for a Foundation Gate1 so a contract transition invalidates older approval |
+| `/devflow approve <gate> <head sha>` | a gate bound to a head (e.g. `gate2`); when policy marks the gate `exact`, supply the full SHA, not its 12-character abbreviation |
 | `/devflow approve rework <head sha>` | one more automatic rework round for that head, beyond `loop.max_rework` (and `implement.max_rounds`); spent by that round |
 | `/devflow approve reviews <head sha>` | one more round of model review for that head, past `reviews.budget.model_calls` and `reviews.max_rounds`; spent by the round it pays for — each comment is one round (post another when a new devflow or policy version asks for the head's reviews again) |
 | `/devflow except <check> <head sha> <reason and alternative evidence>` | a required check that could not run counts, for that head only; never a FAIL |

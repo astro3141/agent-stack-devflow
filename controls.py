@@ -27,6 +27,8 @@ PKG = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(PKG, "fixtures"))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import build  # noqa: E402
+import dfcore  # noqa: E402
+import remote as remote_mod  # noqa: E402
 sys.path.insert(0, "/work/stack/steps")
 import step as stack_step  # noqa: E402 — the roots, as the steps see them
 
@@ -579,7 +581,32 @@ def approve(db, gate, value, user="astro3141"):
 def controls_foundation():
     print("")
     print("foundation — an independent review is a separate identity, bound to this head")
-    s = Sim(foundation_pr_db())
+
+    # Gate1 for a privileged PR binds not just the issue block, but the policy/workflow that gives
+    # that exact scope meaning.  This is the migration case: an approval from the old transaction
+    # policy must not authorize the new PR lane.
+    db = foundation_pr_db()
+    edit_policy(db, lambda p: p["human_gates"]["FOUNDATION"][0].__setitem__("binds", "proposal"))
+    s = Sim(db)
+    try:
+        r = s.run()
+        ev = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json")))
+        s.edit(lambda x: approve(x, "gate1", ev["task_digest"]))
+        r = s.run()
+        ev_after_old = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json")))
+        check("a gate1 approval bound only to the old task digest does not survive a policy-bound proposal gate",
+              (phase(r), ev_after_old["gates"][0]["approved"]),
+              ("prepare", False))
+        s.edit(lambda x: approve(x, "gate1", ev["proposal_digest"]))
+        r = s.run()
+        check("the new proposal digest releases gate1 under the current policy/workflow",
+              phase(r) != "prepare", True)
+    finally:
+        s.close()
+
+    db = foundation_pr_db()
+    edit_policy(db, lambda p: p["human_gates"]["FOUNDATION"][1].__setitem__("exact", True))
+    s = Sim(db)
     try:
         r = s.run()
         check("a Foundation without gate 1 waits for the human approval of its scope",
@@ -613,7 +640,10 @@ def controls_foundation():
               ("PASS", True, False))
         s.edit(lambda db: approve(db, "gate2", head[:12]))
         r = s.run()
-        check("gate 2 approved for this head: ready for the merge owner", (verdict(r), r["integrate"].get("ready")), ("PASS", "yes"))
+        check("an abbreviated SHA does not satisfy an exact gate 2", r["state"]["wait"]["need"].startswith("/devflow approve gate2"), True)
+        s.edit(lambda db: approve(db, "gate2", head))
+        r = s.run()
+        check("gate 2 approved for the full exact head: ready for the merge owner", (verdict(r), r["integrate"].get("ready")), ("PASS", "yes"))
         new = s.edit(lambda db: build.push_new_head(db, {"collector/lib/core.sh": "stat -L -c # v2\n"}))
         s.edit(lambda db: set_runs(db, new, build.check_runs()))
         r = s.run()
@@ -621,6 +651,62 @@ def controls_foundation():
               (verdict(r), r["state"]["reviews"]["independent_ok"]), (None, False))
     finally:
         s.close()
+
+    # The promotion envelope itself is deterministic evidence: A contains exactly the approved
+    # product/evidence set and B contains exactly the inert promotion files.
+    db = foundation_pr_db()
+    rr = R(db)
+    task, _ = dfcore.parse_task(rr["issues"]["3"])
+    pr = rr["pulls"]["7"]
+    a, base = pr["head_sha"], pr["base_sha"]
+    task["scope_files"] = ["collector/lib/core.sh"]
+    record_path = ".issue-orchestrator/foundation-pr/T-0054.json"
+    writes = [".issue-orchestrator/authority-guard.sh", record_path]
+    promotion = {"record_path": record_path, "writes": writes,
+                 "evidence_paths": [".devflow/tasks/{task}.yaml"], "scope_mode": "exact"}
+    td, pd = "taskdigest12", "proposaldg12"
+    record = {"schema": "devflow/foundation-promotion@1", "task": "T-0054", "issue": 3,
+              "repository": build.REPO, "canonical_branch": build.CANONICAL,
+              "task_digest": td, "proposal_digest": pd, "canonical_base": base,
+              "foundation_commit": a, "approved_files": task["scope_files"],
+              "evidence_files": [".devflow/tasks/T-0054.yaml"], "promotion_files": sorted(writes)}
+    bfiles = dict(rr["commits"][a]["files"])
+    bfiles[".issue-orchestrator/authority-guard.sh"] = f'EXPECTED_BASE="{a}"\n'
+    bfiles[record_path] = json.dumps(record, sort_keys=True)
+    b = "b" * 40
+    rr["commits"][b] = {"parents": [a], "files": bfiles, "author": dfcore.IMPLEMENTER,
+                         "message": f"Devflow-Promotion: {a}"}
+    pr["head_sha"] = b
+    rr["branches"][pr["head_ref"]] = b
+    # Use the fixture through Sim's persisted path so the same graph implementation exercised by
+    # evaluate is used here too.
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+    try:
+        json.dump(db, tmp); tmp.close()
+        frem = remote_mod.FixtureRemote(tmp.name, build.REPO)
+        pr_doc = frem.pull(7)
+        got = dfcore.validate_promotion(frem, promotion, task, td, pd, pr_doc, base,
+                                        build.REPO, build.CANONICAL)
+        check("a valid A+B promotion envelope preserves the exact Gate1 product scope", got["valid"], True)
+        db2 = copy.deepcopy(db)
+        R(db2)["commits"][a]["files"]["unapproved.txt"] = "no\n"
+        open(tmp.name, "w", encoding="utf-8").write(json.dumps(db2))
+        frem2 = remote_mod.FixtureRemote(tmp.name, build.REPO)
+        bad = dfcore.validate_promotion(frem2, promotion, task, td, pd, frem2.pull(7), base,
+                                        build.REPO, build.CANONICAL)
+        check("an extra file in A fails closed", (bad["valid"], any("unapproved" in p for p in bad["problems"])),
+              (False, True))
+        db3 = copy.deepcopy(db)
+        R(db3)["commits"][b]["files"][".issue-orchestrator/control-plane-guard.sh"] = "tampered\n"
+        open(tmp.name, "w", encoding="utf-8").write(json.dumps(db3))
+        frem3 = remote_mod.FixtureRemote(tmp.name, build.REPO)
+        bad2 = dfcore.validate_promotion(frem3, promotion, task, td, pd, frem3.pull(7), base,
+                                         build.REPO, build.CANONICAL)
+        check("an extra file in B fails closed", (bad2["valid"], any("promotion files" in p for p in bad2["problems"])),
+              (False, True))
+    finally:
+        try: os.unlink(tmp.name)
+        except OSError: pass
 
     # declared ORDINARY but the change touches a semantic owner: never silently accepted
     db = build.scanner_pass()

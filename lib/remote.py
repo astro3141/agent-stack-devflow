@@ -40,6 +40,9 @@ class Conflict(RemoteError):
     an existing ref). The caller asks again what the state is; it does not treat this as done."""
 
 
+_UNSET = object()
+
+
 # ----------------------------------------------------------------------------------- GitHub
 class GitHubRemote:
     API = "https://api.github.com"
@@ -349,15 +352,8 @@ class GitHubRemote:
                     written.append(rel)
         return written
 
-    def push_commit(self, branch, parent, changes, message, author, base=None, extra_parents=()):
-        """One commit with `changes` ({path: (bytes, mode) | None for a deletion}) applied to the tree
-        of `base` (default `parent`), whose parents are `parent` and `extra_parents`, and `branch`
-        moved to it — created if absent, fast-forwarded if present, never forced. A branch that
-        moved away from `parent` meanwhile is a Conflict: someone else pushed.
-
-        `base` and `extra_parents` are how a change is brought onto a newer canonical head without
-        rewriting what was pushed: the tree is canonical's plus the change, the parents are the
-        branch's head and canonical — a merge the branch fast-forwards to."""
+    def create_commit(self, parent, changes, message, author, base=None, extra_parents=()):
+        """Create a commit object without making it reachable from a branch."""
         import base64
         base = base or parent
         tree_items = []
@@ -370,14 +366,27 @@ class GitHubRemote:
             tree_items.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
         base_tree = self._call("GET", f"/git/commits/{base}")["tree"]["sha"]
         tree = self._call("POST", "/git/trees", {"base_tree": base_tree, "tree": tree_items})
-        commit = self._call("POST", "/git/commits", {"message": message, "tree": tree["sha"],
-                                                    "parents": [parent] + list(extra_parents),
-                                                    "author": author})["sha"]
+        return self._call("POST", "/git/commits", {"message": message, "tree": tree["sha"],
+                                                   "parents": [parent] + list(extra_parents),
+                                                   "author": author})["sha"]
+
+    def push_commit(self, branch, parent, changes, message, author, base=None, extra_parents=(),
+                    branch_expected=_UNSET):
+        """Create one commit and move `branch` to it without forcing.
+
+        With `branch_expected`, the ref must still have that exact value (including None for a new
+        branch). A promotion can therefore create dangling A, create B with parent A, and expose
+        both with one B ref update; a failed promotion never leaves the task branch pointing at A.
+        Without it, the historical behavior accepts a missing branch or a branch at `parent`."""
         now = self.branch_head_or_none(branch)
+        if branch_expected is not _UNSET and now != branch_expected:
+            raise Conflict(f"{branch} is at {str(now)[:12]}, not at {str(branch_expected)[:12]}: someone else pushed")
+        if branch_expected is _UNSET and now is not None and now != parent:
+            raise Conflict(f"{branch} is at {now[:12]}, not at {parent[:12]}: someone else pushed")
+        commit = self.create_commit(parent, changes, message, author, base=base,
+                                    extra_parents=extra_parents)
         if now is None:
             self.create_ref(f"refs/heads/{branch}", commit)
-        elif now != parent:
-            raise Conflict(f"{branch} is at {now[:12]}, not at {parent[:12]}: someone else pushed")
         else:
             self._call("PATCH", f"/git/refs/heads/{branch}", {"sha": commit, "force": False})
         return commit
@@ -669,12 +678,9 @@ class FixtureRemote:
             written.append(rel)
         return written
 
-    def push_commit(self, branch, parent, changes, message, author, base=None, extra_parents=()):
+    def create_commit(self, parent, changes, message, author, base=None, extra_parents=()):
         import hashlib
         self._up()
-        now = self.r["branches"].get(branch)
-        if now is not None and now != parent:
-            raise Conflict(f"fixture: {branch} is at {now}, not at {parent}")
         files = dict(self._files(base or parent))
         for path, ch in changes.items():
             if ch is None:
@@ -684,6 +690,20 @@ class FixtureRemote:
         new = "d" + hashlib.sha1(json.dumps([parent, message, files], sort_keys=True).encode()).hexdigest()[:39]
         self.r["commits"][new] = {"parents": [parent] + list(extra_parents), "files": files,
                                   "author": author.get("name", ""), "message": message}
+        self._save()
+        return new
+
+    def push_commit(self, branch, parent, changes, message, author, base=None, extra_parents=(),
+                    branch_expected=_UNSET):
+        self._up()
+        now = self.r["branches"].get(branch)
+        if branch_expected is not _UNSET and now != branch_expected:
+            raise Conflict(f"fixture: {branch} is at {now}, not at {branch_expected}")
+        if branch_expected is _UNSET and now is not None and now != parent:
+            raise Conflict(f"fixture: {branch} is at {now}, not at {parent}")
+        new = self.create_commit(parent, changes, message, author, base=base,
+                                 extra_parents=extra_parents)
+        self._load()
         self.r["branches"][branch] = new
         for p in self.r["pulls"].values():
             if p.get("head_ref") == branch and p.get("state") == "open":

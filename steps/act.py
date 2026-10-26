@@ -46,7 +46,7 @@ def decide(st, ev):
         return "none", "the task names a person as its implementer (implement: human)"
     if st.get("execution", {}).get("status") != "OK":
         return "none", "this run's machinery failed; nothing is acted on"
-    if (ev.get("flow") or {}).get("name", "pull_request") != "pull_request":
+    if (ev.get("flow") or {}).get("kind", (ev.get("flow") or {}).get("name", "pull_request")) != "pull_request":
         return "none", f"this change class is published through the {ev['flow']['name']} flow, by a person"
     w = st.get("wait") or {}
     hist = st.get("history") or {}

@@ -137,7 +137,8 @@ def main(argv):
             st["wait"] = {"reason": "verification", "need": "the head moved after the verdict; evaluate again",
                           "owner": "devflow", "resume_when": "the next run"}
             return finish()
-        if locks and not rem.contains(canonical, head):
+        promotion = ((ev.get("flow") or {}).get("promotion") or {})
+        if (locks or promotion) and not rem.contains(canonical, head):
             st.update(phase="implement", verdict=None, progress="waiting")
             st["wait"] = {"reason": "implementation", "need": "the canonical branch moved: update, regenerate, re-verify",
                           "owner": "implementer", "resume_when": "the head contains the canonical head"}
@@ -157,9 +158,17 @@ def main(argv):
         if pr.get("merged"):
             act["skipped"].append("already merged")
             return finish(merged=True)
+        if promotion and integ.get("method", "merge") != "merge":
+            st.update(phase="integrate", verdict="NEEDS_DECISION", progress="waiting")
+            st["wait"] = {"reason": "decision",
+                          "need": "set integration.method: merge; squash/rebase rewrites the approved A+B graph",
+                          "owner": "project policy owner", "resume_when": "the canonical policy requires merge commits"}
+            st["blockers"].append("a Foundation promotion envelope requires merge-commit integration")
+            return finish()
         if integ.get("merge_by", "human") != "agent":
             st["progress"] = "waiting"
-            st["wait"] = {"reason": "merge", "need": f"merge pull request #{pr['number']} at exactly {head[:12]}",
+            method = " with a merge commit" if promotion else ""
+            st["wait"] = {"reason": "merge", "need": f"merge pull request #{pr['number']} at exactly {head[:12]}{method}",
                           "owner": integ.get("merge_owner") or "the merge owner the policy names",
                           "resume_when": "the pull request is merged; the next run verifies the merge commit"}
             act["did"].append("ready for the merge owner")

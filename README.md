@@ -94,7 +94,7 @@ Item tasks then cite the merged records: their implementer is confined to the pr
 | `prepare_agent` | model, principal `devflow-implementer` (providers only) | the trace (mappings with honest confirmation states) built on the research records, a note of which facts it relies on and from where, `prepare.json` with `decisions` and `gaps` |
 | `proceed` | script | implementation starts only when preparation left no question; otherwise its record is pushed so a person sees it, and the task waits for the decision (NEEDS_DECISION / CONTRACT_GAP in preparation). Answering it in the task block changes the task; the next pass prepares again |
 | `implement_agent` | model, `devflow-implementer` | the change and its tests; `implement.json` |
-| `deliver` | script | the canonical rules decide what may leave the workspace — the project's rule paths are refused (the task's own trace and research record excepted), the project's hook classifies the change and its path floor refuses what the class may not touch; the project's generators run (`implement.regenerate`); **one commit** authored `devflow-implementer` on `devflow/<task id>` (created, or fast-forwarded — never forced; a branch someone else moved is left alone); the pull request, opened once |
+| `deliver` | script | the canonical rules decide what may leave the workspace — the project's rule paths are refused (the task's own trace and research record excepted), the project's hook classifies the change and its path floor refuses what the class may not touch; the project's generators run (`implement.regenerate`); normally **one commit** authored `devflow-implementer` on `devflow/<task id>` (created, or fast-forwarded — never forced; a branch someone else moved is left alone); the pull request, opened once. A named privileged PR flow may add deterministic promotion commit B after product commit A, but only through its canonical promotion command and exact `promotion.writes` set |
 
 The pass then ends waiting for CI on the new head; the next pass judges it like any other change.
 Model reviewers are not spent on a head whose checks are still running or already failing.
@@ -109,6 +109,25 @@ that branch.
 `loop.max_rework` and `loop.max_no_progress` (in the verdict: past them it is NEEDS_DECISION),
 `budget.model_calls` for reviews. Foundation is never implemented by devflow when the project
 publishes it through another flow.
+
+### Privileged pull-request promotion
+
+A project can name a flow whose `kind` is `pull_request` and configure `promotion`. Devflow then
+publishes product commit A plus an inert promotion commit B on the same task branch. A is first an
+unreachable commit object; the branch ref moves only once B exists, so an error cannot expose an
+A-only branch or pull request. The record in B
+binds A to the proposal digest (task scope + canonical policy/workflow/hook and configured
+operational control blobs), canonical base, exact
+approved product files and configured evidence paths. Evaluation rejects extra files in A, extra
+files in B, a stale canonical base, or a non-merge integration graph. Reviews, required checks and
+the head-bound gate run on final PR head B; a person still merges, and post-merge checks run on the
+merge commit.
+
+This proves transaction shape, not that a human physically operated an account. Devflow reads the
+GitHub author of an approval comment and rejects an implementer identity, but GitHub cannot tell
+whether that account acted in the UI or through a credential available to another process. Required
+checks and reviews are server-enforced only when the repository plan and branch rules provide them;
+`integrate` reports the rules it could observe.
 
 ## GitHub, from the panel
 
@@ -211,7 +230,7 @@ exposing something the fixtures could not:
 
 ## Evidence rules the controls pin
 
-`controls.py` (149 controls, fixture remotes, no model, no network) drives the real steps:
+`controls.py` (fixture remotes, no model, no network) drives the real steps:
 
 - a review counts only for the head GitHub attaches it to, the head it names, and the policy digest
   it was written under; a new head, a policy change or a criterion change on canonical makes it stale
