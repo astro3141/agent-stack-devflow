@@ -1,0 +1,6 @@
+name: scanner-fixture
+repository: fixture/infra-scanner
+canonical_branch: recovery/phase-5.3-b1
+policy_path: .devflow/project.yaml
+remote: fixture
+fixture: scanner-pass

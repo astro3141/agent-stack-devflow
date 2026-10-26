@@ -201,6 +201,16 @@ def flow_path(value, task):
     return str(value).format(task=task.get("id", ""), issue=task.get("issue", ""))
 
 
+def promotion_guard_text(text, product_head):
+    """The only permitted edit to a baseline guard; preserve every other byte/line."""
+    if not isinstance(text, str):
+        raise ValueError("the baseline guard is missing")
+    pattern = r'(?m)^EXPECTED_BASE="[0-9a-f]{40}"(?=\r?$)'
+    if len(re.findall(pattern, text)) != 1:
+        raise ValueError("the baseline guard must have exactly one full-SHA EXPECTED_BASE assignment")
+    return re.sub(pattern, f'EXPECTED_BASE="{product_head}"', text)
+
+
 def validate_promotion(rem, promotion, task, task_digest, proposal_digest, pr, canonical_head,
                        repository=None, canonical_branch=None):
     """Validate the two-commit envelope used by a privileged pull-request flow.
@@ -242,6 +252,9 @@ def validate_promotion(rem, promotion, task, task_digest, proposal_digest, pr, c
     except (TypeError, ValueError) as e:
         problems.append(f"promotion record is not JSON: {type(e).__name__}")
         return out
+    if not isinstance(record, dict):
+        problems.append("promotion record must be a JSON object")
+        return out
 
     base = str(record.get("canonical_base") or "")
     approved = sorted({str(p) for p in task.get("scope_files") or []})
@@ -268,8 +281,8 @@ def validate_promotion(rem, promotion, task, task_digest, proposal_digest, pr, c
             problems.append(f"promotion record {key} is {got!r}, expected {want!r}")
     if not base:
         problems.append("promotion record canonical_base is missing")
-    elif not rem.contains(base, product_head):
-        problems.append("Foundation commit A does not contain the recorded canonical base")
+    elif list((rem.commit(product_head) or {}).get("parents") or []) != [base]:
+        problems.append("Foundation commit A must be the direct single-parent child of canonical_base")
     if not pr.get("merged") and base != canonical_head:
         problems.append(f"promotion was built on canonical {base[:12]}, current canonical is {canonical_head[:12]}")
 
@@ -277,9 +290,11 @@ def validate_promotion(rem, promotion, task, task_digest, proposal_digest, pr, c
         problems.append(f"promotion record names unconfigured evidence files: {sorted(set(evidence) - set(allowed_evidence))}")
     if set(approved) & set(writes):
         problems.append("approved product files overlap promotion files")
+    if set(evidence) & set(writes):
+        problems.append("evidence files overlap promotion files")
 
     if base:
-        product_files = set(rem.changed_files(base, product_head)["files"]) - set(writes)
+        product_files = set(rem.changed_files(base, product_head)["files"])
         expected_product = set(approved) | set(evidence)
         if promotion.get("scope_mode", "exact") == "exact" and product_files != expected_product:
             problems.append("canonical_base -> A differs from the exact approved/evidence file set: "
@@ -290,6 +305,19 @@ def validate_promotion(rem, promotion, task, task_digest, proposal_digest, pr, c
         actual_evidence = sorted(product_files & set(allowed_evidence))
         if evidence != actual_evidence:
             problems.append(f"promotion record evidence_files is {evidence}, actual is {actual_evidence}")
+
+    guard = promotion.get("baseline_path")
+    if not guard or writes != sorted([guard, record_path]):
+        problems.append("promotion.writes must be exactly baseline_path and record_path")
+    else:
+        try:
+            original = rem.file_at(product_head, guard)
+            if base and original != rem.file_at(base, guard):
+                problems.append("Foundation commit A changed the baseline guard")
+            if rem.file_at(head, guard) != promotion_guard_text(original, product_head):
+                problems.append("B changed guard content beyond EXPECTED_BASE")
+        except ValueError as e:
+            problems.append(str(e))
 
     promotion_files = sorted(rem.changed_files(product_head, head)["files"])
     if promotion_files != writes:
@@ -305,6 +333,8 @@ def validate_promotion(rem, promotion, task, task_digest, proposal_digest, pr, c
             problems.append("Foundation merge first parent is not the canonical base recorded in the envelope")
         if merge_sha and rem.changed_files(head, merge_sha)["files"]:
             problems.append("the merge commit tree differs from exact PR head B")
+        if not merge_sha or not rem.contains(merge_sha, canonical_head):
+            problems.append("the merge commit is not in the canonical history")
 
     out.update(valid=not problems, record_path=record_path, product_head=product_head,
                candidate_head=head, canonical_base=base, approved_files=approved,

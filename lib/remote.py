@@ -306,6 +306,13 @@ class GitHubRemote:
         r = self._call("POST", "/pulls", {"head": head_ref, "base": base_ref, "title": title[:250], "body": body})
         return r["number"]
 
+    def close_pull(self, number, expected_head):
+        pr = self.pull(number)
+        if pr.get("merged") or pr["head_sha"] != expected_head:
+            raise Conflict("superseded PR was merged or its head changed")
+        if pr["state"] != "closed":
+            self._call("PATCH", f"/pulls/{int(number)}", {"state": "closed"})
+
     def commit(self, sha):
         """{message, parents, author} of a commit, or None when there is none."""
         c = self._call("GET", f"/git/commits/{sha}", ok404=True)
@@ -677,6 +684,15 @@ class FixtureRemote:
                     f.write(text)
             written.append(rel)
         return written
+
+    def close_pull(self, number, expected_head):
+        self._up()
+        pr = self.r["pulls"][str(number)]
+        if pr.get("merged") or pr["head_sha"] != expected_head:
+            raise Conflict("fixture: superseded PR was merged or its head changed")
+        pr["state"] = "closed"
+        self._save()
+        self._lose("close_pull")
 
     def create_commit(self, parent, changes, message, author, base=None, extra_parents=()):
         import hashlib

@@ -123,11 +123,28 @@ files in B, a stale canonical base, or a non-merge integration graph. Reviews, r
 the head-bound gate run on final PR head B; a person still merges, and post-merge checks run on the
 merge commit.
 
+A must be the direct child of the recorded canonical base C. Its full diff is checked; promotion
+paths are never subtracted from that diff. B's guard blob must equal A's with only the single
+`EXPECTED_BASE` value replaced. `promotion.baseline_path` names that guard.
+
+Rework creates a fresh C→A2→B2 on a revision branch and opens a new PR, closing the exact previous
+candidate without deleting its evidence or force-pushing. Every new B needs fresh checks, review and
+Gate2. After merge, proposal inputs are read at M's first parent C; the workflow identity comes from
+the same B's published PASS with all gates approved. The newly promoted guard cannot invalidate its
+own approval, and a PASS still waiting for Gate2 cannot authorize post-merge completion.
+
 This proves transaction shape, not that a human physically operated an account. Devflow reads the
 GitHub author of an approval comment and rejects an implementer identity, but GitHub cannot tell
 whether that account acted in the UI or through a credential available to another process. Required
 checks and reviews are server-enforced only when the repository plan and branch rules provide them;
 `integrate` reports the rules it could observe.
+
+`foundation-controls` runs the standalone tests and the full controls against the pinned public
+agent-stack checkout (`e805b2b5514a26c2770521549c2597f6653b75f2`) in a Python container. The
+registration and research hosts in `tests/` configure only that disposable fixture instance. The
+Foundation scenarios drive the real evaluate/adjudicate/act/work/deliver/review/integrate steps;
+model output, GitHub checks, approval comments and the human merge are simulated. Live model and
+GitHub publication validation remains a separate activation check, never inferred from fixture PASS.
 
 ## GitHub, from the panel
 

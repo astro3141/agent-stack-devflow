@@ -302,6 +302,13 @@ def main(argv):
         else:
             n = pr["number"]
         hist["pr"] = n
+        hist["branch"] = branch
+        if work.get("supersedes"):
+            old = work["supersedes"]
+            previous = list(hist.get("superseded_prs") or [])
+            if old not in previous:
+                hist["superseded_prs"] = previous + [old]
+            rem.close_pull(old["number"], old["head"])
         report["pr"] = n
     except remote_mod.RemoteError as e:
         report["tool"] = f"{type(e).__name__}: {e}"[:300]

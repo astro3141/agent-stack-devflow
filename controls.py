@@ -656,13 +656,14 @@ def controls_foundation():
     # product/evidence set and B contains exactly the inert promotion files.
     db = foundation_pr_db()
     rr = R(db)
-    task, _ = dfcore.parse_task(rr["issues"]["3"])
+    task, _ = dfcore.parse_task(dict(rr["issues"]["3"], number=3))
     pr = rr["pulls"]["7"]
     a, base = pr["head_sha"], pr["base_sha"]
     task["scope_files"] = ["collector/lib/core.sh"]
     record_path = ".issue-orchestrator/foundation-pr/T-0054.json"
     writes = [".issue-orchestrator/authority-guard.sh", record_path]
     promotion = {"record_path": record_path, "writes": writes,
+                 "baseline_path": writes[0],
                  "evidence_paths": [".devflow/tasks/{task}.yaml"], "scope_mode": "exact"}
     td, pd = "taskdigest12", "proposaldg12"
     record = {"schema": "devflow/foundation-promotion@1", "task": "T-0054", "issue": 3,
@@ -671,6 +672,8 @@ def controls_foundation():
               "foundation_commit": a, "approved_files": task["scope_files"],
               "evidence_files": [".devflow/tasks/T-0054.yaml"], "promotion_files": sorted(writes)}
     bfiles = dict(rr["commits"][a]["files"])
+    rr["commits"][base]["files"][writes[0]] = 'EXPECTED_BASE="' + "c" * 40 + '"\n'
+    rr["commits"][a]["files"][writes[0]] = rr["commits"][base]["files"][writes[0]]
     bfiles[".issue-orchestrator/authority-guard.sh"] = f'EXPECTED_BASE="{a}"\n'
     bfiles[record_path] = json.dumps(record, sort_keys=True)
     b = "b" * 40
@@ -1895,10 +1898,13 @@ def dfcore_mark():
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, os.path.join(PKG, "tests"))
+    from stack_foundation_scenarios import controls_foundation_pr
     for group in (controls_flow, controls_block, controls_stale, controls_foundation, controls_evidence,
                   controls_shared, controls_effects, controls_rules, controls_tool, controls_implement,
                   controls_auth):
         group()
+    controls_foundation_pr(sys.modules[__name__])
     print("")
     print(f"{len(PASS_)}/{len(PASS_) + len(FAIL_)} controls")
     sys.exit(1 if FAIL_ else 0)

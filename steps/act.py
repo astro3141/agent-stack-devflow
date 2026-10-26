@@ -52,6 +52,7 @@ def decide(st, ev):
     hist = st.get("history") or {}
     modes = impl.get("modes") or {}
     pr = st.get("pr")
+    own_branch = hist.get("branch") or dfcore.task_branch(task)
     # a person's grant of one more rework round (`/devflow approve rework <head>`) is one more
     # round here too — the grant would be empty if the round cap still refused it
     rounds = int(hist.get("implement_rounds") or 0)
@@ -79,10 +80,10 @@ def decide(st, ev):
     if not pr:
         return "prepare", "no implementation exists yet"
     if ev.get("prepare_only"):
-        if pr.get("head_ref") != dfcore.task_branch(task):
+        if pr.get("head_ref") != own_branch:
             return "none", "the pull request is not devflow's"
         return "prepare", "the task answers what preparation asked; prepare again, then implement"
-    if pr.get("head_ref") != dfcore.task_branch(task) or not (ev.get("implementers") or {}).get("devflow_only"):
+    if pr.get("head_ref") != own_branch or not (ev.get("implementers") or {}).get("devflow_only"):
         return "none", "the pull request holds commits devflow did not push: its implementer continues it"
     if any("not on the latest canonical head" in b for b in st.get("blockers") or []) and not st.get("verdict"):
         return "rebase", "the change must be brought onto the canonical head and regenerated"

@@ -47,6 +47,7 @@ class FoundationPromotionTests(unittest.TestCase):
         self.writes = [".issue-orchestrator/authority-guard.sh", self.record_path]
         self.task = {"id": "T-F-1", "issue": 40, "scope_files": ["collector/lib/core.sh"]}
         self.promotion = {"record_path": self.record_path, "writes": self.writes,
+                          "baseline_path": self.writes[0],
                           "evidence_paths": [".devflow/tasks/{task}.yaml"], "scope_mode": "exact"}
         record = {"schema": "devflow/foundation-promotion@1", "task": "T-F-1", "issue": 40,
                   "repository": "owner/repo", "canonical_branch": "main",
@@ -55,7 +56,7 @@ class FoundationPromotionTests(unittest.TestCase):
                   "approved_files": ["collector/lib/core.sh"],
                   "evidence_files": [".devflow/tasks/T-F-1.yaml"],
                   "promotion_files": sorted(self.writes)}
-        base_files = {"collector/lib/core.sh": "old\n", ".issue-orchestrator/authority-guard.sh": "old-base\n"}
+        base_files = {"collector/lib/core.sh": "old\n", self.writes[0]: 'EXPECTED_BASE="' + "c" * 40 + '"\n'}
         a_files = {**base_files, "collector/lib/core.sh": "fixed\n",
                    ".devflow/tasks/T-F-1.yaml": "trace\n"}
         b_files = {**a_files, ".issue-orchestrator/authority-guard.sh": f'EXPECTED_BASE="{self.a}"\n',
@@ -87,6 +88,22 @@ class FoundationPromotionTests(unittest.TestCase):
         commits = copy.deepcopy(self.commits)
         commits[self.b]["files"]["evaluator/check_registry.py"] = "tamper\n"
         self.assertIn("promotion files", " ".join(self.validate(commits)["problems"]))
+
+    def test_guard_change_hidden_in_a_is_rejected(self):
+        commits = copy.deepcopy(self.commits)
+        commits[self.a]["files"][self.writes[0]] += "exit 0 # bypass\n"
+        self.assertIn("baseline guard", " ".join(self.validate(commits)["problems"]))
+
+    def test_code_in_allowed_b_guard_path_is_rejected(self):
+        commits = copy.deepcopy(self.commits)
+        commits[self.b]["files"][self.writes[0]] += "exit 0 # bypass\n"
+        self.assertIn("beyond EXPECTED_BASE", " ".join(self.validate(commits)["problems"]))
+
+    def test_previous_ab_pair_cannot_be_hidden_in_a_ancestry(self):
+        commits = copy.deepcopy(self.commits)
+        commits["old-b"] = {"parents": [self.base], "files": dict(commits[self.base]["files"])}
+        commits[self.a]["parents"] = ["old-b"]
+        self.assertIn("direct single-parent child", " ".join(self.validate(commits)["problems"]))
 
     def test_squash_or_rebase_merge_is_rejected(self):
         commits = copy.deepcopy(self.commits)

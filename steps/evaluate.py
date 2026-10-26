@@ -95,7 +95,8 @@ def implementers_of(task, pr, changed, hist=None):
 def find_pr(rem, task, hist):
     """The task's pull request: the one the task block names; else the one devflow opened for it
     (recorded in the published state, or found by the task's branch)."""
-    if task.get("pr"):
+    superseded = {p["number"] for p in hist.get("superseded_prs") or []}
+    if task.get("pr") and task["pr"] not in superseded:
         return rem.pull(task["pr"])
     if hist.get("pr"):
         return rem.pull(hist["pr"])
@@ -231,22 +232,44 @@ def main(argv):
     ev["task"] = task
 
     try:
-        pol = dfcore.load_policy(rem, reg, canonical_head)
-        hook_root = os.path.join(D, "policy")
-        hook_digests = dfcore.materialize_hook(rem, pol, canonical_head, hook_root)
-        base_lenses, lenses = dfcore.load_lenses(pol, hook_root)
         pr = find_pr(rem, task, ev["history"])
+        pol = dfcore.load_policy(rem, reg, canonical_head)
+        approval_ref = canonical_head
+        live_flow = (pol.get("flow_defs") or {}).get(
+            (pol.get("flows") or {}).get(task.get("change_class")), {}) or {}
+        promotion_pass = ev["history"].get("promotion_pass") or {}
+        # After merge, approval inputs are read at M's first parent, never from the guard B just
+        # promoted. The old PASS's workflow identity is trusted only from our own published state,
+        # and only for the same head. Candidate JSON cannot choose this historical trust anchor.
+        merged_promotion_required = bool(pr and pr.get("merged") and (live_flow.get("promotion") or promotion_pass))
+        if merged_promotion_required:
+            merge = rem.commit(pr.get("merge_commit_sha")) if pr.get("merge_commit_sha") else None
+            parents = list((merge or {}).get("parents") or [])
+            if len(parents) == 2:
+                approval_ref = parents[0]
+                pol = dfcore.load_policy(rem, reg, approval_ref)
+                pr = dict(pr, observed_base_sha=pr["base_sha"], base_sha=approval_ref)
+            historical_flow = (pol.get("flow_defs") or {}).get(
+                (pol.get("flows") or {}).get(task.get("change_class")), {}) or {}
+            if not historical_flow.get("promotion"):
+                ev["prepare"]["problems"].append("the merged Foundation has no promotion contract at its actual pre-merge base")
+        hook_root = os.path.join(D, "policy")
+        hook_digests = dfcore.materialize_hook(rem, pol, approval_ref, hook_root)
+        base_lenses, lenses = dfcore.load_lenses(pol, hook_root)
         changed = rem.changed_files(pr["base_sha"], pr["head_sha"]) if pr else {"files": [], "authors": []}
-        crit = dfcore.criteria_blobs(rem, pol, canonical_head)
+        crit = dfcore.criteria_blobs(rem, pol, approval_ref)
     except (dfcore.ConfigError, remote_mod.RemoteError) as e:
         ev["tool"].append(f"{type(e).__name__}: {e}" + (f" ({e.hint})" if getattr(e, "hint", "") else ""))
         return done()
 
     wf = dfcore.workflow_identity()
+    if pr and pr.get("merged") and promotion_pass.get("head") == pr["head_sha"]:
+        wf = promotion_pass.get("workflow") or wf
     frame = dfcore.frame_of(reg, pol, wf, pr, canonical_head, crit, hook_digests, task)
     ev.update(frame=frame, pr=pr, changed=changed["files"], policy={"ref": pol["_ref"], "digest": pol["_digest"]},
               policy_doc={k: v for k, v in pol.items() if not k.startswith("_")},
               canonical_head=canonical_head, branch=dfcore.task_branch(task))
+    ev["approval_ref"] = approval_ref
     impl = implementers_of(task, pr, changed, ev["history"])
     ev["implementers"] = impl
     # a task type the project routes to a lane of its own is reviewed by the research reviewer
@@ -317,7 +340,7 @@ def main(argv):
     promotion = flow.get("promotion") or {}
     approval_paths = sorted({dfcore.flow_path(p, task) for p in promotion.get("approval_paths") or []})
     try:
-        approval_blobs = {p: rem.blob_id(canonical_head, p) for p in approval_paths}
+        approval_blobs = {p: rem.blob_id(approval_ref, p) for p in approval_paths}
     except remote_mod.RemoteError as e:
         ev["tool"].append(f"RemoteError: {e}")
         return done(assignments=[])
@@ -440,14 +463,19 @@ def main(argv):
             ev["tool"].append(f"RemoteError: {e}")
             runs = []
         delivery = list((pol.get("delivery") or {}).get("checks") or [])
-        promotion_ok = not promotion or bool((ev.get("promotion") or {}).get("valid"))
+        promotion_ok = (not promotion and not merged_promotion_required) or (bool((ev.get("promotion") or {}).get("valid"))
+            and promotion_pass.get("head") == pr["head_sha"]
+            and promotion_pass.get("proposal_digest") == proposal_digest
+            and promotion_pass.get("approval_ref") == approval_ref
+            and promotion_pass.get("gates_approved") is True)
         ev["finalize"] = {"post": dfcore.evaluate_checks(post, {}, runs, pr.get("merge_commit_sha")),
                           "delivery": dfcore.evaluate_checks(delivery, {}, runs, pr.get("merge_commit_sha"))
                           if ev["end_point"] == "delivery" else None,
                           "merge_commit": pr.get("merge_commit_sha"),
                           "passed_head": (ev["history"].get("passed_head") or "") if promotion_ok else "",
                           "why_no_pass": (None if promotion_ok else
-                                          "; ".join((ev.get("promotion") or {}).get("problems") or []))}
+                                          "; ".join((ev.get("promotion") or {}).get("problems") or [])
+                                          or "no pre-merge PASS with all human gates for this exact proposal and head")}
         return done(assignments=[])
 
     if not pr:

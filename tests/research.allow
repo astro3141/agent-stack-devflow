@@ -1,0 +1,2 @@
+# Fixture instance only: prompt rendering is tested; no networking is enabled by this file.
+^packages\.ubuntu\.com$

@@ -88,6 +88,11 @@ def main(argv):
             return finish()
 
         # ------------------------------------------------ the head is still the one judged?
+        for old in st.get("history", {}).get("superseded_prs") or []:
+            rem.close_pull(old["number"], old["head"])
+            for lock in locks:
+                if rem.ref(lock_ref(lock)) == old["head"]:
+                    rem.delete_ref(lock_ref(lock))
         # asked before any lock is taken: a head nobody judged must not hold the shared artifact
         pr = rem.pull(frame["pr"])
         if pr["head_sha"] != head:
