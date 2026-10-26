@@ -116,6 +116,13 @@ class FoundationPromotionTests(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_exact_gate_instructs_the_full_sha(self):
+        full = "f" * 40
+        state = dfcore.adjudicate({"prepare": {}, "tool": [],
+                                   "gates": [{"id": "gate2", "phase": "prepare",
+                                              "approved": False, "value": full, "exact": True}]})
+        self.assertEqual(state["wait"]["need"], f"/devflow approve gate2 {full}")
+
 
 if __name__ == "__main__":
     unittest.main()

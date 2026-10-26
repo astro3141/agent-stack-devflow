@@ -739,9 +739,11 @@ def adjudicate(ctx):
             "the task block is valid"))
     for g in ctx.get("gates") or []:
         if g.get("phase") == "prepare" and not g.get("approved"):
-            blockers.append(f"human gate {g['id']} is not approved for {str(g.get('value'))[:12]}")
+            gate_value = str(g.get("value") or "")
+            shown = gate_value if g.get("exact") else gate_value[:12]
+            blockers.append(f"human gate {g['id']} is not approved for {shown}")
             return out("prepare", None, wait=wait(
-                "decision", f"/devflow approve {g['id']} {str(g.get('value'))[:12]}",
+                "decision", f"/devflow approve {g['id']} {shown}",
                 "an approver the policy names", "the approval comment is on the issue"))
 
     pr = ctx.get("pr")
@@ -957,9 +959,11 @@ def adjudicate(ctx):
             "verification", "compare the artifact's operations", "operator", "the comparison runs"))
     for g in ctx.get("gates") or []:
         if g.get("phase") == "integrate" and not g.get("approved"):
-            blockers.append(f"human gate {g['id']} is not approved for {str(g.get('value'))[:12]}")
+            gate_value = str(g.get("value") or "")
+            shown = gate_value if g.get("exact") else gate_value[:12]
+            blockers.append(f"human gate {g['id']} is not approved for {shown}")
             return out("integrate", "PASS", review_status, wait(
-                "decision", f"/devflow approve {g['id']} {str(g.get('value'))[:12]}",
+                "decision", f"/devflow approve {g['id']} {shown}",
                 "an approver the policy names", "the approval comment is on the issue"))
     return out("integrate", "PASS", review_status)
 
