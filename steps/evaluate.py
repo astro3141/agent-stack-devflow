@@ -21,6 +21,7 @@ import json, os, re, shutil, sys, time
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
+import candidate as candidate_mod  # noqa: E402
 import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 import remote as remote_mod  # noqa: E402
 import refs  # noqa: E402
@@ -236,6 +237,20 @@ def main(argv):
         hook_digests = dfcore.materialize_hook(rem, pol, canonical_head, hook_root)
         base_lenses, lenses = dfcore.load_lenses(pol, hook_root)
         pr = find_pr(rem, task, ev["history"])
+        # A change class published as a transaction (no pull request ever) may still be implemented
+        # by devflow as a local candidate (policy flow_defs.<flow>.candidate: local; lib/candidate.py):
+        # the candidate's commit stands where the pull request's head would, read from the candidate
+        # repository, never from the remote. Only while nothing is published for the task.
+        ev["candidate"] = None
+        flow0 = (pol.get("flow_defs") or {}).get((pol.get("flows") or {}).get(str(task.get("change_class") or ""), "pull_request")) or {}
+        if pr is None and flow0.get("candidate") == "local" and not str(task.get("transaction_commit") or ""):
+            cdir = candidate_mod.dir_for(reg, task)
+            cur = candidate_mod.load(cdir)
+            if cur:
+                rem = candidate_mod.CandidateRemote(rem, cdir, cur)
+                pr = candidate_mod.synthetic_pr(cur, task)
+                ev["candidate"] = {k: cur.get(k) for k in ("sha", "parent", "base", "base_git", "round", "run", "bundle", "at")}
+                ev["candidate"]["dir"] = cdir
         changed = rem.changed_files(pr["base_sha"], pr["head_sha"]) if pr else {"files": [], "authors": []}
         crit = dfcore.criteria_blobs(rem, pol, canonical_head)
     except (dfcore.ConfigError, remote_mod.RemoteError) as e:
@@ -359,7 +374,7 @@ def main(argv):
     # published result is evidenced (the hook's `transaction_evidence`).
     flow_name = (pol.get("flows") or {}).get(cls.get("change_class"), "pull_request")
     flow = (pol.get("flow_defs") or {}).get(flow_name) or {}
-    ev["flow"] = {"name": flow_name, **{k: flow.get(k) for k in ("need", "owner", "resume_when")}}
+    ev["flow"] = {"name": flow_name, **{k: flow.get(k) for k in ("need", "owner", "resume_when", "candidate")}}
     if flow_name != "pull_request":
         commit = str(task.get("transaction_commit") or "")
         published = False
@@ -368,8 +383,14 @@ def main(argv):
                 published = rem.contains(commit, canonical_head)
             except remote_mod.RemoteError as e:
                 ev["tool"].append(f"RemoteError: {e}")
-        if not published:
+        if not published and ev.get("candidate"):
+            # a local candidate stands for the head: judged like a pull request's head below
+            # (checks from the operator's verification, trace, reviews, gates), published by a
+            # person afterwards — never merged here (steps/integrate.py)
+            pass
+        elif not published:
             return done(assignments=[])
+    if flow_name != "pull_request" and not ev.get("candidate"):
         try:
             rec_path = str(flow.get("record_path") or "").format(issue=task.get("issue"), commit=commit, task=task["id"])
             te = dfcore.run_hook(pol, hook_root, "transaction_evidence", {

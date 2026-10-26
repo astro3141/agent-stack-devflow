@@ -73,6 +73,47 @@ complete every lens. A round that names its models starts only when each is with
 What a reviewer declares it could not verify is recorded as a limit of that
 review; it holds the record only as a blocking finding that names what it endangers.
 
+## 4a. Foundation candidates (a transaction flow, implemented by devflow)
+
+A change class the project publishes as a transaction (the scanner's Foundation: A+B by a person,
+A never pushed alone) is still implemented by devflow when its flow says `candidate: local`:
+
+```yaml
+flow_defs:
+  transaction:
+    candidate: local
+    local_checks:            # check name (as the policy's `checks:` names it) → command run on the candidate's tree
+      scanner-quick: "…"
+      devflow-policy: "python3 .devflow/hooks/check_policy.py"
+```
+
+The sequence, and who moves at each step:
+
+1. **gate1** — the approver: `/devflow approve gate1 <task digest>` (the task block: goal, scope_files).
+2. **implementation** — devflow: prepare and implement as for a pull request, but the result is a
+   *candidate*: a real commit A in `<state_root>/devflow/candidates/<owner__repo>/<task>/repo`, a
+   bundle beside it, `current.json` naming the sha. Nothing is pushed; no pull request, no status.
+   The pass stops: "the operator verifies it next".
+3. **verification** — the operator, on their machine:
+   `python3 tools/verify_candidate.py --project <p> --task <id> --checkout <clone>` fetches the
+   bundle into the clone (refusing unless the commit has exactly the candidate's sha), runs the
+   policy's `local_checks` in a temporary worktree at that sha, and writes
+   `verification/<sha>.json`. That file is the candidate's only source of check results: absent, the
+   checks are NOT_RUN and no review is spent; for another sha, it is no verification at all.
+4. **review** — the next pass: the independent model review reads the frozen candidate (diff,
+   tree, checks from the verification) exactly as for a pull request's head. REQUEST_CHANGES sends
+   devflow back to implement; the new candidate gets a new sha, a new bundle, a new verification.
+5. **gate2** — the approver: `/devflow approve gate2 <A sha>` — the sha in the state comment, which
+   is the sha the reviews and the verification name.
+6. **publication** — a person, never devflow: fetch the bundle (`git fetch <bundle> <sha>`), run the
+   project's publication procedure (the scanner: verify-rebaseline preflight, B, A+B push,
+   postpublish), then set `transaction_commit: <A>` in the task block. The next pass verifies the
+   published pair through the project's `transaction_evidence` and closes the task.
+
+What devflow guarantees here (controls `candidate`): no write to the remote for a candidate; the
+reviewed, verified and approved sha are one sha; a candidate without verification never reaches a
+review or gate2.
+
 ## 5. When it waits for you
 
 The state comment ends with `waiting (<reason>): <need> · owner: <who> · resumes when: <condition>`.

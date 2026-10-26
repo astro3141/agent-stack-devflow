@@ -74,6 +74,22 @@ def main(argv):
         locks = sorted(set(locks) | {integ["serialize_all"]})
 
     try:
+        # ------------------------------------------------ a local candidate: nothing to merge here
+        # A transaction flow's candidate (lib/candidate.py) is published by a person as A+B after
+        # gate2; devflow records that it is ready and what the person does next. No lock (the
+        # candidate is not on the remote), no merge, no status.
+        if (st.get("pr") or {}).get("candidate") and st["phase"] != "done":
+            flow = (ev.get("flow") or {})
+            st["progress"] = "waiting"
+            st["wait"] = {"reason": "publication",
+                          "need": f"publish candidate {head[:12]} as the transaction (A = exactly {head}; fetch "
+                                  f"`{(st.get('pr') or {}).get('bundle') or 'the bundle'}` into your checkout, "
+                                  f"verify-rebaseline preflight, A+B), then name it in the task block: transaction_commit: {head}",
+                          "owner": flow.get("owner") or "human operator",
+                          "resume_when": flow.get("resume_when") or "canonical contains A and the record"}
+            st["next"] = st["wait"]["need"]
+            act["did"].append("ready for the person who publishes the transaction")
+            return finish(ready=True)
         # ------------------------------------------------ release, after a completed integration
         if st["phase"] == "done":
             # the merged run computed no shared-artifact state: look at every lock the policy has

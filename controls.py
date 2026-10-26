@@ -674,7 +674,7 @@ def controls_foundation():
 
 
 # ================================================================================== evidence
-def model_receipt(ws, members=None, context=None, write=True, stale=False, tamper=False, frame_from=None):
+def model_receipt(ws, members=None, context=None, write=True, stale=False, tamper=False, frame_from=None, policy_digest=None):
     """What steps/tasks.py writes for a fan-out: the review file and a receipt naming it. Without
     `members`, one member per model assignment evaluate made — whatever the policy's grouping."""
     ev = json.load(open(os.path.join(ws, "devflow", "evaluation.json")))
@@ -684,7 +684,7 @@ def model_receipt(ws, members=None, context=None, write=True, stale=False, tampe
     rc = {"context": context or frame["id"], "members": {}}
     for label, lenses in members.items():
         name = f"review_{label}.json"
-        body = build.review_body(frame["head_sha"], lenses, basis=frame["basis"])
+        body = build.review_body(frame["head_sha"], lenses, basis=frame["basis"], **({"digest": policy_digest} if policy_digest else {}))
         doc = json.loads(body.split("```devflow-review\n")[1].split("\n```")[0])
         doc["frame_id"] = frame["id"]
         text = json.dumps(doc)
@@ -1803,6 +1803,126 @@ def controls_auth():
         shutil.rmtree(d, ignore_errors=True)
 
 
+# ================================================================================== candidate
+def candidate_db():
+    """A Foundation in the scanner's own transaction flow, implemented by devflow as a local
+    candidate (flow_defs.transaction.candidate: local): no pull request, nothing pushed."""
+    db = impl_db()
+
+    def pol(p):
+        p["flow_defs"]["transaction"]["candidate"] = "local"
+        p["flow_defs"]["transaction"]["local_checks"] = {
+            "scanner-quick": "true", "devflow-policy": "true", "scanner-publish": "true", "plan-ops": "true", "distro-smoke": "true"}
+    edit_policy(db, pol, head_too=False)
+    set_task(db, change_class="FOUNDATION", impacts=["contract_changed", "shared_plan_changed"], pr=None, implementer=None,
+             scope_files=["items/kisa/U-54.yaml", "bindings/linux/u54.yaml", "collection-plan.tsv", "dist/collection-plan.tsv",
+                          "tests/test_u54_ftp.py", ".devflow/tasks/T-0054.yaml", ".devflow/tasks/T-0054.research.md"])
+    return db
+
+
+def candidate_dir(db):
+    """Where devflow keeps the fixture task's candidate (one repository under the scratch state root)."""
+    root = os.path.join(stack_step.runtime()["paths"]["state_root"], "devflow", "candidates")
+    for d in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        t = os.path.join(root, d, "T-0054")
+        if os.path.isdir(t):
+            return t
+    return None
+
+
+def controls_candidate():
+    print("")
+    print("candidate — a transaction Foundation is implemented locally: judged like a head, never pushed, published by a person")
+    import candidate as cmod
+    import subprocess as sp
+    root = os.path.join(stack_step.runtime()["paths"]["state_root"], "devflow", "candidates")
+    shutil.rmtree(root, ignore_errors=True)
+    s = Sim(candidate_db())
+    try:
+        r = s.run_pass(good_model)
+        check("gate 1 first: nothing is implemented before the person approves the scope",
+              (r["act"].get("do"), phase(r), r["state"]["wait"]["reason"]), ("none", "prepare", "decision"))
+        task_digest = json.load(open(os.path.join(r["ws"], "devflow", "evaluation.json")))["task_digest"]
+        s.edit(lambda db: approve(db, "gate1", task_digest))
+        r = s.run_pass(good_model)
+        db = s.db
+        cdir = candidate_dir(db)
+        cur = cmod.load(cdir) if cdir else None
+        check("gate 1 approved: devflow prepares and implements, and the result is a local candidate, not a push",
+              (r["act"].get("do"), r["deliver"].get("delivered"), branch_of(db), R(db)["pulls"], bool(cur)),
+              ("prepare", "yes", None, {}, True))
+        sha = (cur or {}).get("sha", "")
+        check("the candidate is a real commit in the candidate repository, and the bundle carries exactly it",
+              (len(sha) == 40, sp.run(["git", "-C", os.path.join(cdir, "repo"), "cat-file", "-t", sha], capture_output=True, text=True).stdout.strip(),
+               os.path.isfile(cur["bundle"]), sha in sp.run(["git", "-C", os.path.join(cdir, "repo"), "bundle", "list-heads", cur["bundle"]], capture_output=True, text=True).stdout),
+              (True, "commit", True, True))
+        check("the candidate's tree holds what the implementer wrote, on top of the base",
+              (cmod.file_at(os.path.join(cdir, "repo"), sha, "items/kisa/U-54.yaml") or "").startswith("id: U-54"), True)
+        check("the published state waits for the operator's local verification, not for CI, with no status on the remote",
+              (phase(r), verdict(r), r["state"]["wait"]["reason"], r["state"]["wait"]["owner"], R(db).get("statuses", {})),
+              ("verify_review", None, "verification", "operator", {}))
+        check("drive stops here: a candidate has no CI to wait for",
+              drive_decide({"ok": True, "delivered": "yes", "wait": "verification", "owner": "operator", "next": "verify"})[0], False)
+
+        r2 = s.run(review_mode="model")
+        ev2 = json.load(open(os.path.join(r2["ws"], "devflow", "evaluation.json")))
+        check("the next pass judges the candidate's sha as the head; its checks are NOT_RUN until verified; no review is spent",
+              ((ev2.get("pr") or {}).get("head_sha"), (ev2.get("pr") or {}).get("candidate"), ev2["checks"]["pending"] != [],
+               r2["evaluate"].get("need_models")), (sha, True, True, "no"))
+        # the operator's verification of exactly this sha
+        vdir = os.path.join(cdir, "verification"); os.makedirs(vdir, exist_ok=True)
+        json.dump({"sha": "0" * 40, "at": "2026-10-26T00:00:00Z", "by": "op", "host": "mac",
+                   "checks": {n: {"result": "PASS"} for n in ev2["checks"]["required"]}},
+                  open(os.path.join(vdir, "0" * 40 + ".json"), "w"))
+        r3 = s.run(review_mode="model")
+        check("a verification of another sha is no verification of this candidate",
+              json.load(open(os.path.join(r3["ws"], "devflow", "evaluation.json")))["checks"]["pending"] != [], True)
+        json.dump({"sha": sha, "at": "2026-10-26T00:00:00Z", "by": "op", "host": "mac",
+                   "checks": {n: {"result": "PASS", "why": "exit 0"} for n in ev2["checks"]["required"]}},
+                  open(os.path.join(vdir, f"{sha}.json"), "w"))
+        # the reviews are written under the policy as this scenario edited it (candidate: local)
+        r4 = s.run(review_mode="model", receipt=lambda ws: model_receipt(ws, policy_digest=canonical_digest(s.db)))
+        check("verified: the checks PASS from the operator's file, the model reviews run on the frozen candidate, and gate 2 binds the candidate's sha",
+              (r4["state"]["checks"]["complete"], verdict(r4), phase(r4), r4["state"]["wait"]["need"]),
+              (True, "PASS", "integrate", f"/devflow approve gate2 {sha[:12]}"))
+        s.edit(lambda db: approve(db, "gate2", sha[:12]))
+        r5 = s.run(review_mode="model")
+        check("gate 2 approved: ready for the person who publishes A+B — nothing merged, nothing pushed",
+              (verdict(r5), r5["integrate"].get("ready"), r5["state"]["wait"]["reason"], r5["state"]["wait"]["owner"],
+               branch_of(s.db), R(s.db)["pulls"]), ("PASS", "yes", "publication", "human operator", None, {}))
+
+        def publish_ab(db):
+            rr = R(db)
+            c = rr["branches"][build.CANONICAL]
+            files = dict(rr["commits"][c]["files"])
+            files["items/kisa/U-54.yaml"] = "id: U-54\nbaseline_status: confirmed\n"
+            rr["commits"][sha] = {"parents": [c], "files": files, "author": "devflow-implementer"}
+            files2 = dict(files)
+            files2[".issue-orchestrator/rebaseline/3-" + sha + ".yaml"] = (
+                "foundation_commit: " + sha + "\nfoundation_actor: devflow-implementer\nhuman_approval: {approver: astro3141}\n"
+                "validation_evidence: {validated_sha: " + sha + ", exit_code: 0}\n"
+                "independent_review: {reviewer: devflow-reviewer, session_id: s-1, reviewed_sha: " + sha + ", blocking_findings: []}\n")
+            rr["commits"]["b" * 40] = {"parents": [sha], "files": files2, "author": "astro3141"}
+            rr["branches"][build.CANONICAL] = "b" * 40
+            rr["check_runs"]["b" * 40] = build.check_runs(["scanner-quick", "scanner-publish", "devflow-policy", "distro-smoke"])
+        s.edit(publish_ab)
+        s.edit(lambda db: set_task(db, transaction_commit=sha))
+        r6 = s.run()
+        check("published by the person as A+B with the record binding review and validation to exactly A: done",
+              (verdict(r6), phase(r6)), ("PASS", "done"))
+    finally:
+        s.close()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def drive_decide(p, prev=None, waited=0, max_wait=3600):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("drive_ctl", os.path.join(STEPS, "drive.py"))
+    drive = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(drive)
+    return drive.decide(p, prev, waited, max_wait)
+
+
 def dfcore_mark():
     import dfcore
     return dfcore.PR_MARK
@@ -1811,7 +1931,7 @@ def dfcore_mark():
 if __name__ == "__main__":
     for group in (controls_flow, controls_block, controls_stale, controls_foundation, controls_evidence,
                   controls_shared, controls_effects, controls_rules, controls_tool, controls_implement,
-                  controls_auth):
+                  controls_auth, controls_candidate):
         group()
     print("")
     print(f"{len(PASS_)}/{len(PASS_) + len(FAIL_)} controls")

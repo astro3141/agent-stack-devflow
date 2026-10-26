@@ -25,6 +25,7 @@ import hashlib, json, os, shutil, sys, time
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
+import candidate as candidate_mod  # noqa: E402
 import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 import remote as remote_mod  # noqa: E402
 from wstree import tree_map  # noqa: E402
@@ -117,7 +118,7 @@ def main(argv):
     impl = pol.get("implement") or {}
     task = ev["task"]
     reg = dfcore.registration(project)
-    rem = dfcore.open_remote(reg, WS, PROXY)
+    rem = candidate_mod.wrap(dfcore.open_remote(reg, WS, PROXY), reg, task, ev)   # a local candidate's tree, when one stands
     canonical = ev["canonical_head"]
     pr = st.get("pr")
     branch = dfcore.task_branch(task)

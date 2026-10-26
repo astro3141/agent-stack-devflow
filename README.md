@@ -110,6 +110,15 @@ that branch.
 `budget.model_calls` for reviews. Foundation is never implemented by devflow when the project
 publishes it through another flow.
 
+## Foundation candidates (a transaction flow)
+
+A class the project publishes as a transaction — the scanner's Foundation, a commit pair A+B by a
+person, A never pushed alone — is implemented by devflow as a *local candidate* when the flow says
+`candidate: local` (lib/candidate.py; RUNBOOK §4a). The candidate is a real commit in devflow's
+state directory, bundled for the operator; the operator's local verification stands in for CI
+(`tools/verify_candidate.py`); the review and gate2 bind to the candidate's sha; publication stays
+a person's act. Nothing about a candidate is ever written to the remote.
+
 ## GitHub, from the panel
 
 Under a devflow workflow the panel shows **연결** (the package's login, OPERATIONS §44). Press it,

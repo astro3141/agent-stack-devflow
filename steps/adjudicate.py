@@ -110,6 +110,17 @@ def main(argv):
            "auto_rework": str(((ev.get("policy_doc") or {}).get("implement") or {}).get("by") or "human") == "agent"
                           and str((ev.get("task") or {}).get("implement") or "agent") == "agent"}
     st = dfcore.adjudicate(ctx)
+    if ev.get("candidate") and (st.get("wait") or {}).get("reason") == "verification" and st["wait"].get("owner") == "CI":
+        # a local candidate has no CI: its required checks are the operator's local verification
+        # (tools/verify_candidate.py writes verification/<sha>.json beside the candidate)
+        c = ev["candidate"]
+        st["wait"] = {"reason": "verification",
+                      "need": f"local verification of candidate {str(c.get('sha'))[:12]}: on the operator's machine, "
+                              f"`python3 tools/verify_candidate.py --project {ev.get('project')} --task {ev['task']['id']} "
+                              f"--checkout <your clone>` (devflow package), which runs the policy's local_checks and writes "
+                              f"verification/{str(c.get('sha'))[:12]}….json",
+                      "owner": "operator", "resume_when": "the verification file for this candidate exists; then run again"}
+        st["next"] = st["wait"]["need"]
     if ev.get("notes"):
         # what evaluate noticed about the inputs (rules edited by the change, marker comments it
         # did not trust) is said on the issue too

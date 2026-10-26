@@ -28,6 +28,7 @@ import fnmatch, json, os, re, subprocess, sys, time
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
+import candidate as candidate_mod  # noqa: E402
 import step  # noqa: E402 — the stack's step helper: run id, workspace, the answer line
 import remote as remote_mod  # noqa: E402
 from wstree import tree_map  # noqa: E402
@@ -190,6 +191,8 @@ def main(argv):
     author = {"name": dfcore.IMPLEMENTER, "email": dfcore.IMPLEMENTER_EMAIL,
               "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     branch = work["branch"]
+    if (ev.get("flow") or {}).get("candidate") == "local":
+        return deliver_candidate(reg, pol, task, ev, st, hist, work, changes_blob, message, author, prep, done, hold, final, gen, kind, report, finish)
     try:
         rem = dfcore.open_remote(reg, WS, PROXY)
         now = rem.branch_head_or_none(branch)
@@ -254,6 +257,77 @@ def main(argv):
                         "owner": "CI", "resume_when": "the required checks complete on that head"})
         st["notes"] = [f"devflow pushed {head[:12]} to {branch} ({kind}, round {work.get('round')})"] + \
                       ([f"generated files regenerated: {sorted(p for p in final if matches(p, gen))}"] if gen else [])
+    st["next"] = st["wait"]["need"]
+    return finish(True)
+
+
+def deliver_candidate(reg, pol, task, ev, st, hist, work, changes_blob, message, author, prep, done, hold, final, gen, kind, report, finish):
+    """A transaction flow's delivery: the commit is built in the candidate repository (lib/candidate.py)
+    and bundled for the operator; nothing is pushed, no pull request is opened, no status is set.
+    The sha recorded here is the one the reviews, the verification and gate2 will name."""
+    cdir = candidate_mod.dir_for(reg, task)
+    try:
+        rem = dfcore.open_remote(reg, WS, PROXY)          # read-only: the token and the base's objects
+        repo, base_git = candidate_mod.ensure_repo(cdir, rem, work["canonical"], PROXY)
+        prev = candidate_mod.load(cdir)
+        if work.get("new_branch") or not prev:
+            parent = base_git
+        else:
+            if prev.get("sha") != work["parent"]:
+                return finish(False, failure=f"the candidate moved: it stands at {str(prev.get('sha'))[:12]}, this round "
+                                             f"started from {str(work['parent'])[:12]}; devflow does not overwrite it")
+            parent = prev["sha"]
+        extra = [base_git if p == work["canonical"] else p for p in (work.get("extra_parents") or [])]
+        sha = candidate_mod.commit(repo, parent, changes_blob, message, author, extra_parents=extra)
+        bpath = candidate_mod.bundle(repo, base_git, sha, os.path.join(cdir, f"{sha}.bundle"))
+    except (remote_mod.RemoteError, RuntimeError, OSError) as e:
+        report["tool"] = f"{type(e).__name__}: {e}"[:300]
+        st.setdefault("execution", {"status": "OK", "errors": []})
+        st["execution"] = {"status": "TOOL_FAILURE", "errors": list(st["execution"].get("errors") or []) + [report["tool"]]}
+        return finish(False, failure=f"the candidate could not be built: {report['tool']}")
+    cur = {"task": task["id"], "repository": reg["repository"], "sha": sha, "parent": parent,
+           "base": work["canonical"], "base_git": base_git, "round": work.get("round"), "run": RUN,
+           "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "bundle": bpath, "kind": kind,
+           "stage": work.get("stage"), "hold": bool(hold)}
+    candidate_mod.save(cdir, cur)
+    # a candidate is devflow's own commit, like a push would be: implementers_of reads this
+    hist["pushed"] = list(hist.get("pushed") or []) + [sha]
+    hist["candidate"] = {k: cur[k] for k in ("sha", "parent", "base", "round", "bundle", "at")}
+    report["head"] = sha
+    report["candidate"] = cur
+    st["publish_status"] = False
+    st["blockers"] = []
+    st["pr"] = candidate_mod.synthetic_pr(cur, task)
+    if hold:
+        dec, gaps = list(prep.get("decisions") or []), list(prep.get("gaps") or [])
+        research = research_requests(task, prep)
+        hist["prepare_hold"] = {"task_digest": ev.get("task_digest"), "decisions": dec, "gaps": gaps,
+                                "research": research, "head": sha, "rules_at": work["canonical"]}
+        report["hold"] = "decision" if dec else ("contract_gap" if gaps else "research")
+        blockers = ([f"decision: {d}" for d in dec] + [f"contract gap: {g}" for g in gaps]
+                    + [f"research needed: {q['id']} — {q.get('question')}" for q in research])
+        if dec or gaps:
+            st.update(phase="prepare", verdict="NEEDS_DECISION" if dec else "CONTRACT_GAP", progress="waiting",
+                      blockers=blockers,
+                      wait={"reason": "decision" if dec else "contract_gap",
+                            "need": "answer preparation's questions in the task block (the task changes, and devflow prepares again)",
+                            "owner": "decision owner", "resume_when": "the task block records the decision"})
+        else:
+            ids = ", ".join(q["id"] for q in research) or "(none named)"
+            st.update(phase="prepare", verdict=None, progress="waiting", blockers=blockers,
+                      wait={"reason": "research",
+                            "need": f"a research task that answers {ids}, merged under the project's research directory",
+                            "owner": "research lane",
+                            "resume_when": f"a merged research record lists {ids} under `answers:` (or `unanswered:`)"})
+    else:
+        hist.pop("prepare_hold", None)
+        st.update(phase="verify_review", verdict=None, progress="waiting",
+                  wait={"reason": "verification",
+                        "need": f"local verification of candidate {sha[:12]} by the operator (tools/verify_candidate.py), then the reviews",
+                        "owner": "operator", "resume_when": "verification/<sha>.json exists for this candidate"})
+    st["notes"] = [f"devflow built local candidate {sha[:12]} ({kind}, round {work.get('round')}) in {cdir}; "
+                   f"bundle {os.path.basename(bpath)}; nothing was pushed"] + \
+                  ([f"generated files regenerated: {sorted(p for p in final if matches(p, gen))}"] if gen else [])
     st["next"] = st["wait"]["need"]
     return finish(True)
 

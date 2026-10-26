@@ -85,6 +85,9 @@ def decide(p, prev, waited, max_wait):
         return False, 0, "the task is done"
     delivered = str(p.get("delivered") or "").startswith("yes")
     w, owner = p.get("wait") or "", p.get("owner") or ""
+    if delivered and w == "verification" and owner == "operator":
+        # a local candidate (transaction flow): there is no CI to wait for; a person verifies it
+        return False, 0, f"devflow built a local candidate; the operator verifies it next: {p.get('next') or ''}"
     if delivered:
         return True, -1, "devflow pushed a new head; CI judges it next"
     if w == "verification" and owner == "CI":

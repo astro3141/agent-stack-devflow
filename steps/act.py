@@ -17,6 +17,10 @@ changes nothing on the remote. Prints `do`:
   none       anything else: a person, CI or a reviewer has the next move, or the project does not
              let devflow implement (policy `implement.by`), or the task says a person implements it
 
+A change class published as a transaction (the scanner's Foundation) is implemented as a local
+candidate when its flow says `candidate: local` (lib/candidate.py): prepare and implement apply as
+above, with the candidate's commit standing where the pull request's head would.
+
 Where the rules come from: the verdict and its phase are adjudicate's, and this step only reads
 them. The rework limit (`loop.max_rework`) and the no-progress limit are already in that verdict: a
 task past them is NEEDS_DECISION, not REQUEST_CHANGES. `implement.max_rounds` bounds every
@@ -46,8 +50,9 @@ def decide(st, ev):
         return "none", "the task names a person as its implementer (implement: human)"
     if st.get("execution", {}).get("status") != "OK":
         return "none", "this run's machinery failed; nothing is acted on"
-    if (ev.get("flow") or {}).get("name", "pull_request") != "pull_request":
-        return "none", f"this change class is published through the {ev['flow']['name']} flow, by a person"
+    flow = ev.get("flow") or {}
+    if flow.get("name", "pull_request") != "pull_request" and flow.get("candidate") != "local":
+        return "none", f"this change class is published through the {flow['name']} flow, by a person"
     w = st.get("wait") or {}
     hist = st.get("history") or {}
     modes = impl.get("modes") or {}

@@ -95,8 +95,9 @@ def main(argv):
                     raise
                 skipped.append("state comment had been added; the answer was lost")
         head = frame.get("head_sha")
-        # a run that pushed a new head leaves the judged head's status as it was
-        if head and st.get("publish_status", True):
+        # a run that pushed a new head leaves the judged head's status as it was; a local candidate
+        # is not on the remote, so it has no status there (its state is the issue comment)
+        if head and st.get("publish_status", True) and not (st.get("pr") or {}).get("candidate"):
             state = STATUS.get(st.get("verdict") or "", "pending")
             desc = f"{st.get('verdict') or 'undecided'} · {st['phase']} · {st.get('progress')}"
             if st["execution"]["status"] != "OK":
