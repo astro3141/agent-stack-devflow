@@ -105,6 +105,16 @@ class FoundationPromotionTests(unittest.TestCase):
         commits[self.a]["parents"] = ["old-b"]
         self.assertIn("direct single-parent child", " ".join(self.validate(commits)["problems"]))
 
+    def test_scope_including_the_promotion_writer_or_approval_paths_is_rejected(self):
+        promotion = dict(self.promotion, command=["python3", ".issue-orchestrator/prepare.py"],
+                         approval_paths=[".issue-orchestrator/prepare.py", self.writes[0]])
+        for path in (".issue-orchestrator/prepare.py", self.writes[0]):
+            task = dict(self.task, scope_files=["collector/lib/core.sh", path])
+            pr = {"head_sha": self.b, "merged": False, "merge_commit_sha": None}
+            got = dfcore.validate_promotion(FakeRemote(self.commits), promotion, task, "task-digest",
+                                            "proposal-digest", pr, self.base, "owner/repo", "main")
+            self.assertIn("promotion/approval paths", " ".join(got["problems"]), path)
+
     def test_squash_or_rebase_merge_is_rejected(self):
         commits = copy.deepcopy(self.commits)
         commits[self.merge]["parents"] = [self.base]

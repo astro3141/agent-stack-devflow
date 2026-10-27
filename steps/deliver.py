@@ -217,6 +217,15 @@ def main(argv):
         if not promotion.get("command") or not promotion_writes or record_path not in promotion_writes:
             return finish(False, failure="the privileged pull-request flow has no complete promotion command/writes/record_path")
         approved = sorted({str(p) for p in task.get("scope_files") or []})
+        # The promotion writer and the paths Gate1 binds to (approval_paths) run or are trusted
+        # here with this step's own rights: a product scope that includes them would execute or
+        # alter unreviewed, model-written code before any review. Refused, whatever Gate1 said.
+        control = {dfcore.flow_path(p, task) for p in list(promotion.get("approval_paths") or []) + list(promotion.get("writes") or [])}
+        if promotion.get("command"):
+            control.add(dfcore.flow_path(promotion["command"][-1], task))
+        clash = sorted(set(approved) & control)
+        if clash:
+            return finish(False, failure=f"the Foundation scope includes promotion or approval paths, which a product commit may not change: {clash}")
         actual = set(final)
         actual_evidence = sorted(actual & set(evidence_paths))
         expected = set(approved) | set(actual_evidence)

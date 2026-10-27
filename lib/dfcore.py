@@ -290,6 +290,11 @@ def validate_promotion(rem, promotion, task, task_digest, proposal_digest, pr, c
         problems.append(f"promotion record names unconfigured evidence files: {sorted(set(evidence) - set(allowed_evidence))}")
     if set(approved) & set(writes):
         problems.append("approved product files overlap promotion files")
+    control = {flow_path(p, task) for p in promotion.get("approval_paths") or []}
+    if (promotion.get("command") or [None])[-1]:
+        control.add(flow_path(promotion["command"][-1], task))
+    if set(approved) & control:
+        problems.append(f"approved product files include promotion/approval paths: {sorted(set(approved) & control)}")
     if set(evidence) & set(writes):
         problems.append("evidence files overlap promotion files")
 
