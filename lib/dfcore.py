@@ -196,6 +196,157 @@ def parse_task(issue):
     return t, ""
 
 
+def flow_path(value, task):
+    """Expand the task-bound paths used by a pull-request promotion envelope."""
+    return str(value).format(task=task.get("id", ""), issue=task.get("issue", ""))
+
+
+def promotion_guard_text(text, product_head):
+    """The only permitted edit to a baseline guard; preserve every other byte/line."""
+    if not isinstance(text, str):
+        raise ValueError("the baseline guard is missing")
+    pattern = r'(?m)^EXPECTED_BASE="[0-9a-f]{40}"(?=\r?$)'
+    if len(re.findall(pattern, text)) != 1:
+        raise ValueError("the baseline guard must have exactly one full-SHA EXPECTED_BASE assignment")
+    return re.sub(pattern, f'EXPECTED_BASE="{product_head}"', text)
+
+
+def validate_promotion(rem, promotion, task, task_digest, proposal_digest, pr, canonical_head,
+                       repository=None, canonical_branch=None):
+    """Validate the two-commit envelope used by a privileged pull-request flow.
+
+    The pull request head is the inert promotion commit B and its first parent is the product
+    commit A.  The task-approved files live in A; B may change only the configured promotion files.
+    This keeps the generic workflow ignorant of a project's baseline format while still proving the
+    graph and exact file sets before reviews, gate 2 and integration can count.
+    """
+    out = {"required": True, "valid": False, "problems": []}
+    problems = out["problems"]
+    if not pr or not pr.get("head_sha"):
+        problems.append("the privileged pull-request flow has no pull request head")
+        return out
+
+    head = pr["head_sha"]
+    record_path = flow_path(promotion.get("record_path") or "", task)
+    writes = sorted({flow_path(p, task) for p in promotion.get("writes") or []})
+    allowed_evidence = sorted({flow_path(p, task) for p in promotion.get("evidence_paths") or []})
+    if not record_path or record_path not in writes:
+        problems.append("promotion.record_path must be one of promotion.writes")
+        return out
+    if not writes:
+        problems.append("promotion.writes is empty")
+        return out
+
+    commit = rem.commit(head)
+    parents = list((commit or {}).get("parents") or [])
+    if len(parents) != 1:
+        problems.append(f"promotion commit B must have one parent, found {len(parents)}")
+        return out
+    product_head = parents[0]
+    text = rem.file_at(head, record_path)
+    if text is None:
+        problems.append(f"promotion record is missing at {record_path}")
+        return out
+    try:
+        record = json.loads(text)
+    except (TypeError, ValueError) as e:
+        problems.append(f"promotion record is not JSON: {type(e).__name__}")
+        return out
+    if not isinstance(record, dict):
+        problems.append("promotion record must be a JSON object")
+        return out
+
+    base = str(record.get("canonical_base") or "")
+    approved = sorted({str(p) for p in task.get("scope_files") or []})
+    evidence = sorted({str(p) for p in record.get("evidence_files") or []})
+    expected = {
+        "schema": "devflow/foundation-promotion@1",
+        "task": str(task.get("id") or ""),
+        "issue": int(task.get("issue") or 0),
+        "task_digest": task_digest,
+        "proposal_digest": proposal_digest,
+        "foundation_commit": product_head,
+        "approved_files": approved,
+        "promotion_files": writes,
+    }
+    if repository:
+        expected["repository"] = str(repository)
+    if canonical_branch:
+        expected["canonical_branch"] = str(canonical_branch)
+    for key, want in expected.items():
+        got = record.get(key)
+        if key in ("approved_files", "promotion_files"):
+            got = sorted({str(p) for p in got or []})
+        if got != want:
+            problems.append(f"promotion record {key} is {got!r}, expected {want!r}")
+    if not base:
+        problems.append("promotion record canonical_base is missing")
+    elif list((rem.commit(product_head) or {}).get("parents") or []) != [base]:
+        problems.append("Foundation commit A must be the direct single-parent child of canonical_base")
+    if not pr.get("merged") and base != canonical_head:
+        problems.append(f"promotion was built on canonical {base[:12]}, current canonical is {canonical_head[:12]}")
+
+    if any(p not in allowed_evidence for p in evidence):
+        problems.append(f"promotion record names unconfigured evidence files: {sorted(set(evidence) - set(allowed_evidence))}")
+    if set(approved) & set(writes):
+        problems.append("approved product files overlap promotion files")
+    control = {flow_path(p, task) for p in promotion.get("approval_paths") or []}
+    if (promotion.get("command") or [None])[-1]:
+        control.add(flow_path(promotion["command"][-1], task))
+    if set(approved) & control:
+        problems.append(f"approved product files include promotion/approval paths: {sorted(set(approved) & control)}")
+    if set(evidence) & set(writes):
+        problems.append("evidence files overlap promotion files")
+
+    if base:
+        product_files = set(rem.changed_files(base, product_head)["files"])
+        expected_product = set(approved) | set(evidence)
+        if promotion.get("scope_mode", "exact") == "exact" and product_files != expected_product:
+            problems.append("canonical_base -> A differs from the exact approved/evidence file set: "
+                            f"extra={sorted(product_files - expected_product)}, "
+                            f"missing={sorted(expected_product - product_files)}")
+        elif product_files - expected_product:
+            problems.append(f"canonical_base -> A contains unapproved files: {sorted(product_files - expected_product)}")
+        actual_evidence = sorted(product_files & set(allowed_evidence))
+        if evidence != actual_evidence:
+            problems.append(f"promotion record evidence_files is {evidence}, actual is {actual_evidence}")
+
+    guard = promotion.get("baseline_path")
+    if not guard or writes != sorted([guard, record_path]):
+        problems.append("promotion.writes must be exactly baseline_path and record_path")
+    else:
+        try:
+            original = rem.file_at(product_head, guard)
+            if base and original != rem.file_at(base, guard):
+                problems.append("Foundation commit A changed the baseline guard")
+            if rem.file_at(head, guard) != promotion_guard_text(original, product_head):
+                problems.append("B changed guard content beyond EXPECTED_BASE")
+        except ValueError as e:
+            problems.append(str(e))
+
+    promotion_files = sorted(rem.changed_files(product_head, head)["files"])
+    if promotion_files != writes:
+        problems.append(f"A -> B promotion files are {promotion_files}, expected exactly {writes}")
+
+    if pr.get("merged"):
+        merge_sha = pr.get("merge_commit_sha")
+        merge = rem.commit(merge_sha) if merge_sha else None
+        merge_parents = list((merge or {}).get("parents") or [])
+        if len(merge_parents) != 2 or merge_parents[1] != head:
+            problems.append("Foundation must be merged with a merge commit whose second parent is exact PR head B")
+        elif base and merge_parents[0] != base:
+            problems.append("Foundation merge first parent is not the canonical base recorded in the envelope")
+        if merge_sha and rem.changed_files(head, merge_sha)["files"]:
+            problems.append("the merge commit tree differs from exact PR head B")
+        if not merge_sha or not rem.contains(merge_sha, canonical_head):
+            problems.append("the merge commit is not in the canonical history")
+
+    out.update(valid=not problems, record_path=record_path, product_head=product_head,
+               candidate_head=head, canonical_base=base, approved_files=approved,
+               evidence_files=evidence, promotion_files=writes)
+    return out
+
+
 # ------------------------------------------------------------------------------ policy (approved)
 def load_policy(rem, reg, ref):
     """The project policy, read from the canonical branch at `ref` — never from the candidate.
@@ -623,9 +774,11 @@ def adjudicate(ctx):
             "the task block is valid"))
     for g in ctx.get("gates") or []:
         if g.get("phase") == "prepare" and not g.get("approved"):
-            blockers.append(f"human gate {g['id']} is not approved for {str(g.get('value'))[:12]}")
+            gate_value = str(g.get("value") or "")
+            shown = gate_value if g.get("exact") else gate_value[:12]
+            blockers.append(f"human gate {g['id']} is not approved for {shown}")
             return out("prepare", None, wait=wait(
-                "decision", f"/devflow approve {g['id']} {str(g.get('value'))[:12]}",
+                "decision", f"/devflow approve {g['id']} {shown}",
                 "an approver the policy names", "the approval comment is on the issue"))
 
     pr = ctx.get("pr")
@@ -841,9 +994,11 @@ def adjudicate(ctx):
             "verification", "compare the artifact's operations", "operator", "the comparison runs"))
     for g in ctx.get("gates") or []:
         if g.get("phase") == "integrate" and not g.get("approved"):
-            blockers.append(f"human gate {g['id']} is not approved for {str(g.get('value'))[:12]}")
+            gate_value = str(g.get("value") or "")
+            shown = gate_value if g.get("exact") else gate_value[:12]
+            blockers.append(f"human gate {g['id']} is not approved for {shown}")
             return out("integrate", "PASS", review_status, wait(
-                "decision", f"/devflow approve {g['id']} {str(g.get('value'))[:12]}",
+                "decision", f"/devflow approve {g['id']} {shown}",
                 "an approver the policy names", "the approval comment is on the issue"))
     return out("integrate", "PASS", review_status)
 

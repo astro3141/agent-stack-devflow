@@ -85,6 +85,31 @@ def regenerate(cmds, timeout):
     return ran, ""
 
 
+def run_promotion(cmd, timeout, env):
+    """Run the canonical project's deterministic promotion writer without a shell."""
+    argv = [sys.executable if c in ("python", "python3") else c for c in cmd]
+    try:
+        p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True, timeout=timeout,
+                           env={**os.environ, **env, "PYTHONDONTWRITEBYTECODE": "1"})
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"{' '.join(cmd)}: {type(e).__name__}: {e}"
+    result = {"cmd": " ".join(cmd), "rc": p.returncode, "tail": (p.stdout + p.stderr)[-1500:]}
+    if p.returncode != 0:
+        return result, f"{' '.join(cmd)} exited {p.returncode}: {(p.stdout + p.stderr)[-600:]}"
+    return result, ""
+
+
+def blobs_for(changes):
+    out = {}
+    for path, kind in changes.items():
+        if kind == "D":
+            out[path] = None
+        else:
+            full = os.path.join(REPO, path)
+            out[path] = (open(full, "rb").read(), "100755" if os.access(full, os.X_OK) else "100644")
+    return out
+
+
 def main(argv):
     project, stage = argv[0], argv[1]
     prep_ok = len(argv) > 2 and argv[2] == "True"
@@ -175,13 +200,7 @@ def main(argv):
     report["dropped"] = sorted(p for p in after if p not in final)      # what a generator left behind
     report["changes"] = final
 
-    changes_blob = {}
-    for p, c in final.items():
-        if c == "D":
-            changes_blob[p] = None
-        else:
-            full = os.path.join(REPO, p)
-            changes_blob[p] = (open(full, "rb").read(), "100755" if os.access(full, os.X_OK) else "100644")
+    changes_blob = blobs_for(final)
     summary = (done or {}).get("summary") or (prep or {}).get("summary") or ""
     title = f"{task['id']}: {task.get('goal', '')}"
     kind = "preparation (waiting for a decision)" if hold else ("rebase onto canonical" if stage == "rebase" else "implementation")
@@ -190,17 +209,94 @@ def main(argv):
     author = {"name": dfcore.IMPLEMENTER, "email": dfcore.IMPLEMENTER_EMAIL,
               "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     branch = work["branch"]
+    promotion = ((ev.get("flow") or {}).get("promotion") or {}) if not hold else {}
+    promotion_writes = sorted({dfcore.flow_path(p, task) for p in promotion.get("writes") or []})
+    evidence_paths = sorted({dfcore.flow_path(p, task) for p in promotion.get("evidence_paths") or []})
+    record_path = dfcore.flow_path(promotion.get("record_path") or "", task) if promotion else ""
+    if promotion:
+        if not promotion.get("command") or not promotion_writes or record_path not in promotion_writes:
+            return finish(False, failure="the privileged pull-request flow has no complete promotion command/writes/record_path")
+        approved = sorted({str(p) for p in task.get("scope_files") or []})
+        # The promotion writer and the paths Gate1 binds to (approval_paths) run or are trusted
+        # here with this step's own rights: a product scope that includes them would execute or
+        # alter unreviewed, model-written code before any review. Refused, whatever Gate1 said.
+        control = {dfcore.flow_path(p, task) for p in list(promotion.get("approval_paths") or []) + list(promotion.get("writes") or [])}
+        if promotion.get("command"):
+            control.add(dfcore.flow_path(promotion["command"][-1], task))
+        clash = sorted(set(approved) & control)
+        if clash:
+            return finish(False, failure=f"the Foundation scope includes promotion or approval paths, which a product commit may not change: {clash}")
+        actual = set(final)
+        actual_evidence = sorted(actual & set(evidence_paths))
+        expected = set(approved) | set(actual_evidence)
+        if promotion.get("scope_mode", "exact") == "exact" and actual != expected:
+            return finish(False, failure="the Foundation product commit does not equal the Gate1 scope plus configured evidence: "
+                                         f"extra={sorted(actual - expected)}, missing={sorted(expected - actual)}")
+        if actual - expected:
+            return finish(False, failure=f"the Foundation product commit contains unapproved files: {sorted(actual - expected)}")
+        report["promotion"] = {"record": record_path, "writes": promotion_writes,
+                               "approved": approved, "evidence": actual_evidence}
     try:
         rem = dfcore.open_remote(reg, WS, PROXY)
         now = rem.branch_head_or_none(branch)
         expect = None if work.get("new_branch") else work["parent"]
+        promoted = bool(promotion and now != expect and own_promotion_push(rem, now, work))
         landed = now != expect and own_push(rem, now, work)
-        if now != expect and not landed:
+        if now != expect and not (landed or promoted):
             return finish(False, failure=f"branch {branch} is at {str(now)[:12]}, not at {str(expect)[:12]}: "
                                          "someone else moved it; devflow does not overwrite it")
-        head = now if landed else rem.push_commit(branch, work["parent"], changes_blob, message, author,
-                                                  base=work["base"], extra_parents=work.get("extra_parents") or [])
-        hist["pushed"] = list(hist.get("pushed") or []) + [head]
+        if promoted:
+            head = now
+            product_head = rem.commit(head)["parents"][0]
+            pushed = list(hist.get("pushed") or [])
+            hist["pushed"] = pushed + [s for s in (product_head, head) if s not in pushed]
+            report["product_head"] = product_head
+        else:
+            if not promotion:
+                head = now if landed else rem.push_commit(
+                    branch, work["parent"], changes_blob, message, author,
+                    base=work["base"], extra_parents=work.get("extra_parents") or [])
+                product_head = head
+                hist["pushed"] = list(hist.get("pushed") or []) + [head]
+            else:
+                # A is first created as an unreachable object. The task branch moves only once B
+                # exists, so a failed promotion command cannot expose an A-only branch or PR.
+                product_head = now if landed else rem.create_commit(
+                    work["parent"], changes_blob, message, author,
+                    base=work["base"], extra_parents=work.get("extra_parents") or [])
+                before_promotion = tree_map(REPO)
+                penv = {
+                    "DEVFLOW_PROMOTION_SCHEMA": "devflow/foundation-promotion@1",
+                    "DEVFLOW_REPOSITORY": str(reg.get("repository") or ""),
+                    "DEVFLOW_CANONICAL_BRANCH": str(reg.get("canonical_branch") or ""),
+                    "DEVFLOW_CANONICAL_BASE": str(work.get("canonical") or ""),
+                    "DEVFLOW_FOUNDATION_COMMIT": product_head,
+                    "DEVFLOW_TASK_ID": str(task.get("id") or ""),
+                    "DEVFLOW_ISSUE": str(task.get("issue") or ""),
+                    "DEVFLOW_TASK_DIGEST": str(ev.get("task_digest") or ""),
+                    "DEVFLOW_PROPOSAL_DIGEST": str(ev.get("proposal_digest") or ""),
+                    "DEVFLOW_APPROVED_FILES": json.dumps(sorted({str(p) for p in task.get("scope_files") or []})),
+                    "DEVFLOW_EVIDENCE_FILES": json.dumps(actual_evidence),
+                    "DEVFLOW_PROMOTION_FILES": json.dumps(promotion_writes),
+                    "DEVFLOW_PROMOTION_RECORD": record_path,
+                }
+                promotion_run, err = run_promotion(promotion["command"],
+                                                   int(promotion.get("timeout_s") or 120), penv)
+                report["promotion"]["command"] = promotion_run
+                if err:
+                    return finish(False, failure=f"promotion preparation failed for A {product_head[:12]}: {err}")
+                promotion_changes = diff(before_promotion, tree_map(REPO))
+                if sorted(promotion_changes) != promotion_writes:
+                    return finish(False, failure="promotion command changed a non-exact file set after A "
+                                                 f"{product_head[:12]}: actual={sorted(promotion_changes)}, "
+                                                 f"expected={promotion_writes}")
+                pmessage = (f"{title}\n\nFoundation promotion envelope for A {product_head}.\n\n"
+                            f"Devflow-Task: {task['id']}\nDevflow-Run: {RUN}\n"
+                            f"Devflow-Promotion: {product_head}\n")
+                head = rem.push_commit(branch, product_head, blobs_for(promotion_changes), pmessage, author,
+                                       base=product_head, branch_expected=(now if landed else expect))
+                hist["pushed"] = list(hist.get("pushed") or []) + [product_head, head]
+                report["product_head"] = product_head
         report["head"] = head
         pr = rem.find_pull(branch)
         if pr is None:
@@ -215,6 +311,13 @@ def main(argv):
         else:
             n = pr["number"]
         hist["pr"] = n
+        hist["branch"] = branch
+        if work.get("supersedes"):
+            old = work["supersedes"]
+            previous = list(hist.get("superseded_prs") or [])
+            if old not in previous:
+                hist["superseded_prs"] = previous + [old]
+            rem.close_pull(old["number"], old["head"])
         report["pr"] = n
     except remote_mod.RemoteError as e:
         report["tool"] = f"{type(e).__name__}: {e}"[:300]
@@ -347,6 +450,16 @@ def own_push(rem, sha, work):
     c = rem.commit(sha)
     return bool(c) and f"Devflow-Run: {RUN}" in c["message"] and c["author"] == dfcore.IMPLEMENTER \
         and c["parents"][:1] == [work["parent"]]
+
+
+def own_promotion_push(rem, sha, work):
+    """A resumed delivery recognises its already-pushed B and never creates another envelope."""
+    b = rem.commit(sha)
+    if not b or f"Devflow-Run: {RUN}" not in b["message"] or "Devflow-Promotion:" not in b["message"]:
+        return False
+    if b["author"] != dfcore.IMPLEMENTER or len(b["parents"]) != 1:
+        return False
+    return own_push(rem, b["parents"][0], work)
 
 
 def research_requests(task, prep):

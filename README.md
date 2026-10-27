@@ -94,7 +94,7 @@ Item tasks then cite the merged records: their implementer is confined to the pr
 | `prepare_agent` | model, principal `devflow-implementer` (providers only) | the trace (mappings with honest confirmation states) built on the research records, a note of which facts it relies on and from where, `prepare.json` with `decisions` and `gaps` |
 | `proceed` | script | implementation starts only when preparation left no question; otherwise its record is pushed so a person sees it, and the task waits for the decision (NEEDS_DECISION / CONTRACT_GAP in preparation). Answering it in the task block changes the task; the next pass prepares again |
 | `implement_agent` | model, `devflow-implementer` | the change and its tests; `implement.json` |
-| `deliver` | script | the canonical rules decide what may leave the workspace — the project's rule paths are refused (the task's own trace and research record excepted), the project's hook classifies the change and its path floor refuses what the class may not touch; the project's generators run (`implement.regenerate`); **one commit** authored `devflow-implementer` on `devflow/<task id>` (created, or fast-forwarded — never forced; a branch someone else moved is left alone); the pull request, opened once |
+| `deliver` | script | the canonical rules decide what may leave the workspace — the project's rule paths are refused (the task's own trace and research record excepted), the project's hook classifies the change and its path floor refuses what the class may not touch; the project's generators run (`implement.regenerate`); normally **one commit** authored `devflow-implementer` on `devflow/<task id>` (created, or fast-forwarded — never forced; a branch someone else moved is left alone); the pull request, opened once. A named privileged PR flow may add deterministic promotion commit B after product commit A, but only through its canonical promotion command and exact `promotion.writes` set |
 
 The pass then ends waiting for CI on the new head; the next pass judges it like any other change.
 Model reviewers are not spent on a head whose checks are still running or already failing.
@@ -109,6 +109,42 @@ that branch.
 `loop.max_rework` and `loop.max_no_progress` (in the verdict: past them it is NEEDS_DECISION),
 `budget.model_calls` for reviews. Foundation is never implemented by devflow when the project
 publishes it through another flow.
+
+### Privileged pull-request promotion
+
+A project can name a flow whose `kind` is `pull_request` and configure `promotion`. Devflow then
+publishes product commit A plus an inert promotion commit B on the same task branch. A is first an
+unreachable commit object; the branch ref moves only once B exists, so an error cannot expose an
+A-only branch or pull request. The record in B
+binds A to the proposal digest (task scope + canonical policy/workflow/hook and configured
+operational control blobs), canonical base, exact
+approved product files and configured evidence paths. Evaluation rejects extra files in A, extra
+files in B, a stale canonical base, or a non-merge integration graph. Reviews, required checks and
+the head-bound gate run on final PR head B; a person still merges, and post-merge checks run on the
+merge commit.
+
+A must be the direct child of the recorded canonical base C. Its full diff is checked; promotion
+paths are never subtracted from that diff. B's guard blob must equal A's with only the single
+`EXPECTED_BASE` value replaced. `promotion.baseline_path` names that guard.
+
+Rework creates a fresh C→A2→B2 on a revision branch and opens a new PR, closing the exact previous
+candidate without deleting its evidence or force-pushing. Every new B needs fresh checks, review and
+Gate2. After merge, proposal inputs are read at M's first parent C; the workflow identity comes from
+the same B's published PASS with all gates approved. The newly promoted guard cannot invalidate its
+own approval, and a PASS still waiting for Gate2 cannot authorize post-merge completion.
+
+This proves transaction shape, not that a human physically operated an account. Devflow reads the
+GitHub author of an approval comment and rejects an implementer identity, but GitHub cannot tell
+whether that account acted in the UI or through a credential available to another process. Required
+checks and reviews are server-enforced only when the repository plan and branch rules provide them;
+`integrate` reports the rules it could observe.
+
+`foundation-controls` runs the standalone tests and the full controls against the pinned public
+agent-stack checkout (`e805b2b5514a26c2770521549c2597f6653b75f2`) in a Python container. The
+registration and research hosts in `tests/` configure only that disposable fixture instance. The
+Foundation scenarios drive the real evaluate/adjudicate/act/work/deliver/review/integrate steps;
+model output, GitHub checks, approval comments and the human merge are simulated. Live model and
+GitHub publication validation remains a separate activation check, never inferred from fixture PASS.
 
 ## GitHub, from the panel
 
@@ -211,7 +247,7 @@ exposing something the fixtures could not:
 
 ## Evidence rules the controls pin
 
-`controls.py` (149 controls, fixture remotes, no model, no network) drives the real steps:
+`controls.py` (fixture remotes, no model, no network) drives the real steps:
 
 - a review counts only for the head GitHub attaches it to, the head it names, and the policy digest
   it was written under; a new head, a policy change or a criterion change on canonical makes it stale

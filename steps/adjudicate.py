@@ -139,6 +139,11 @@ def main(argv):
     elif st["verdict"] == "PASS" and st["phase"] == "integrate" and not (ev.get("pr") or {}).get("merged"):
         hist["passed_head"] = head
         hist["no_progress"] = 0
+        if (ev.get("promotion") or {}).get("valid") and all(g.get("approved") for g in ev.get("gates") or []):
+            hist["promotion_pass"] = {"head": head, "proposal_digest": ev["proposal_digest"],
+                "approval_ref": ev["approval_ref"], "workflow": ev["frame"]["workflow"],
+                "gates_approved": True, "gates": ev["gates"], "checks": ev.get("checks"),
+                "review_frame": ev["frame"]["id"]}
     accepted = [a for a in (ev.get("prior_accepted") or [])]
     for v in mreviews:
         if v.get("valid"):

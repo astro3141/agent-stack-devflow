@@ -95,7 +95,8 @@ def implementers_of(task, pr, changed, hist=None):
 def find_pr(rem, task, hist):
     """The task's pull request: the one the task block names; else the one devflow opened for it
     (recorded in the published state, or found by the task's branch)."""
-    if task.get("pr"):
+    superseded = {p["number"] for p in hist.get("superseded_prs") or []}
+    if task.get("pr") and task["pr"] not in superseded:
         return rem.pull(task["pr"])
     if hist.get("pr"):
         return rem.pull(hist["pr"])
@@ -231,22 +232,44 @@ def main(argv):
     ev["task"] = task
 
     try:
-        pol = dfcore.load_policy(rem, reg, canonical_head)
-        hook_root = os.path.join(D, "policy")
-        hook_digests = dfcore.materialize_hook(rem, pol, canonical_head, hook_root)
-        base_lenses, lenses = dfcore.load_lenses(pol, hook_root)
         pr = find_pr(rem, task, ev["history"])
+        pol = dfcore.load_policy(rem, reg, canonical_head)
+        approval_ref = canonical_head
+        live_flow = (pol.get("flow_defs") or {}).get(
+            (pol.get("flows") or {}).get(task.get("change_class")), {}) or {}
+        promotion_pass = ev["history"].get("promotion_pass") or {}
+        # After merge, approval inputs are read at M's first parent, never from the guard B just
+        # promoted. The old PASS's workflow identity is trusted only from our own published state,
+        # and only for the same head. Candidate JSON cannot choose this historical trust anchor.
+        merged_promotion_required = bool(pr and pr.get("merged") and (live_flow.get("promotion") or promotion_pass))
+        if merged_promotion_required:
+            merge = rem.commit(pr.get("merge_commit_sha")) if pr.get("merge_commit_sha") else None
+            parents = list((merge or {}).get("parents") or [])
+            if len(parents) == 2:
+                approval_ref = parents[0]
+                pol = dfcore.load_policy(rem, reg, approval_ref)
+                pr = dict(pr, observed_base_sha=pr["base_sha"], base_sha=approval_ref)
+            historical_flow = (pol.get("flow_defs") or {}).get(
+                (pol.get("flows") or {}).get(task.get("change_class")), {}) or {}
+            if not historical_flow.get("promotion"):
+                ev["prepare"]["problems"].append("the merged Foundation has no promotion contract at its actual pre-merge base")
+        hook_root = os.path.join(D, "policy")
+        hook_digests = dfcore.materialize_hook(rem, pol, approval_ref, hook_root)
+        base_lenses, lenses = dfcore.load_lenses(pol, hook_root)
         changed = rem.changed_files(pr["base_sha"], pr["head_sha"]) if pr else {"files": [], "authors": []}
-        crit = dfcore.criteria_blobs(rem, pol, canonical_head)
+        crit = dfcore.criteria_blobs(rem, pol, approval_ref)
     except (dfcore.ConfigError, remote_mod.RemoteError) as e:
         ev["tool"].append(f"{type(e).__name__}: {e}" + (f" ({e.hint})" if getattr(e, "hint", "") else ""))
         return done()
 
     wf = dfcore.workflow_identity()
+    if pr and pr.get("merged") and promotion_pass.get("head") == pr["head_sha"]:
+        wf = promotion_pass.get("workflow") or wf
     frame = dfcore.frame_of(reg, pol, wf, pr, canonical_head, crit, hook_digests, task)
     ev.update(frame=frame, pr=pr, changed=changed["files"], policy={"ref": pol["_ref"], "digest": pol["_digest"]},
               policy_doc={k: v for k, v in pol.items() if not k.startswith("_")},
               canonical_head=canonical_head, branch=dfcore.task_branch(task))
+    ev["approval_ref"] = approval_ref
     impl = implementers_of(task, pr, changed, ev["history"])
     ev["implementers"] = impl
     # a task type the project routes to a lane of its own is reviewed by the research reviewer
@@ -309,6 +332,37 @@ def main(argv):
     task_digest = dfcore.sha256(dfcore.canon({k: v for k, v in task.items()
                                               if k not in ("issue", "pr", "transaction_commit")}))[:12]
     ev["task_digest"] = task_digest
+    # Resolve the flow before Gate1: a privileged project's operational verifier/writer blobs are
+    # part of what the person approves, not merely paths named by the policy document.
+    flow_name = (pol.get("flows") or {}).get(cls.get("change_class"), "pull_request")
+    flow = (pol.get("flow_defs") or {}).get(flow_name) or {}
+    flow_kind = str(flow.get("kind") or flow_name)
+    promotion = flow.get("promotion") or {}
+    approval_paths = sorted({dfcore.flow_path(p, task) for p in promotion.get("approval_paths") or []})
+    try:
+        approval_blobs = {p: rem.blob_id(approval_ref, p) for p in approval_paths}
+    except remote_mod.RemoteError as e:
+        ev["tool"].append(f"RemoteError: {e}")
+        return done(assignments=[])
+    missing_approval_blobs = sorted(p for p, blob in approval_blobs.items() if not blob)
+    if missing_approval_blobs:
+        ev["prepare"]["problems"].append(
+            f"the privileged flow approval paths are absent on canonical: {missing_approval_blobs}")
+    # A proposal approval also binds the rules and workflow that give the approved scope meaning.
+    # A policy transition therefore cannot silently reuse a gate1 comment made under the old lane.
+    proposal_digest = dfcore.sha256(dfcore.canon({"task": task_digest, "policy": pol["_digest"],
+                                                  "workflow": wf.get("digest"),
+                                                  "hooks": hook_digests,
+                                                  "approval_blobs": approval_blobs}))[:12]
+    ev["proposal_digest"] = proposal_digest
+    ev["proposal_bindings"] = approval_blobs
+
+    # A named flow may declare that it is still a pull-request flow.  This lets a project require a
+    # privileged two-commit promotion envelope without falling into the legacy out-of-band
+    # transaction path merely because its flow has a more precise name.
+    ev["flow"] = {"name": flow_name, "kind": flow_kind,
+                  **{k: flow.get(k) for k in ("need", "owner", "resume_when")},
+                  "promotion": flow.get("promotion")}
     # What devflow's own preparation could not settle (a mapping it could not confirm, a gap in the
     # contract) holds the task until a person records the answer in the task block — which changes
     # the task digest the hold is bound to.
@@ -346,21 +400,32 @@ def main(argv):
                     ev["prepare"]["research"].append(q)
     gate_state = []
     for g in gates:
-        want = task_digest if g.get("binds") == "task" else (pr or {}).get("head_sha")
-        hit = [a for a in given if a["gate"] == g["id"] and a["counted"] and want and a["value"] in (want, str(want)[:12])]
+        want = (task_digest if g.get("binds") == "task" else
+                proposal_digest if g.get("binds") == "proposal" else
+                (pr or {}).get("head_sha"))
+        accepted = (str(want),) if g.get("exact") else (str(want), str(want)[:12])
+        hit = [a for a in given if a["gate"] == g["id"] and a["counted"] and want
+               and a["value"] in accepted]
         gate_state.append({"id": g["id"], "phase": g.get("phase", "prepare"), "binds": g.get("binds"),
-                           "value": want, "approved": bool(hit), "by": [a["by"] for a in hit]})
+                           "value": want, "exact": bool(g.get("exact")),
+                           "approved": bool(hit), "by": [a["by"] for a in hit]})
     ev["gates"] = gate_state
     ev["violations"] = list(cls.get("violations") or [])
 
-    # How this change class reaches the canonical branch. `pull_request` is the default; a project
-    # may name another flow for a class — the infra scanner's Foundation is published by a person
-    # as a commit pair, never as a pull request — and then says what to wait for and how the
-    # published result is evidenced (the hook's `transaction_evidence`).
-    flow_name = (pol.get("flows") or {}).get(cls.get("change_class"), "pull_request")
-    flow = (pol.get("flow_defs") or {}).get(flow_name) or {}
-    ev["flow"] = {"name": flow_name, **{k: flow.get(k) for k in ("need", "owner", "resume_when")}}
-    if flow_name != "pull_request":
+    # A privileged PR is valid only as the configured A+B envelope: exact product scope in A,
+    # inert promotion files in B, and (after integration) an unmodified merge-commit tree.
+    if flow_kind == "pull_request" and promotion and pr:
+        try:
+            ev["promotion"] = dfcore.validate_promotion(rem, promotion, task, task_digest,
+                                                         proposal_digest, pr, canonical_head,
+                                                         reg.get("repository"), reg.get("canonical_branch"))
+            ev["violations"] += [f"promotion: {p}" for p in ev["promotion"].get("problems") or []]
+        except remote_mod.RemoteError as e:
+            ev["tool"].append(f"RemoteError: {e}")
+            return done(assignments=[])
+
+    # A genuinely non-PR flow remains the legacy externally published transaction path.
+    if flow_kind != "pull_request":
         commit = str(task.get("transaction_commit") or "")
         published = False
         if commit:
@@ -398,11 +463,19 @@ def main(argv):
             ev["tool"].append(f"RemoteError: {e}")
             runs = []
         delivery = list((pol.get("delivery") or {}).get("checks") or [])
+        promotion_ok = (not promotion and not merged_promotion_required) or (bool((ev.get("promotion") or {}).get("valid"))
+            and promotion_pass.get("head") == pr["head_sha"]
+            and promotion_pass.get("proposal_digest") == proposal_digest
+            and promotion_pass.get("approval_ref") == approval_ref
+            and promotion_pass.get("gates_approved") is True)
         ev["finalize"] = {"post": dfcore.evaluate_checks(post, {}, runs, pr.get("merge_commit_sha")),
                           "delivery": dfcore.evaluate_checks(delivery, {}, runs, pr.get("merge_commit_sha"))
                           if ev["end_point"] == "delivery" else None,
                           "merge_commit": pr.get("merge_commit_sha"),
-                          "passed_head": ev["history"].get("passed_head") or ""}
+                          "passed_head": (ev["history"].get("passed_head") or "") if promotion_ok else "",
+                          "why_no_pass": (None if promotion_ok else
+                                          "; ".join((ev.get("promotion") or {}).get("problems") or [])
+                                          or "no pre-merge PASS with all human gates for this exact proposal and head")}
         return done(assignments=[])
 
     if not pr:

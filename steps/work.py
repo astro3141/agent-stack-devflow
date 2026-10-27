@@ -109,6 +109,45 @@ def fill(tpl, values):
     return tpl
 
 
+def promotion_revision(rem, pr, task, promotion, canonical, work):
+    """Rebuild a candidate from canonical on a fresh branch; retain prior PRs as audit evidence."""
+    previous = pr["head_sha"]
+    record_path = dfcore.flow_path(promotion["record_path"], task)
+    record = json.loads(rem.file_at(previous, record_path) or "{}")
+    source = record.get("foundation_commit") or previous  # preparation-only PRs have no B yet
+    if record and list((rem.commit(previous) or {}).get("parents") or []) != [source]:
+        raise dfcore.ConfigError("the previous promotion is not a single-parent B -> A boundary")
+    allowed = sorted(set(task.get("scope_files") or []) |
+                     {dfcore.flow_path(p, task) for p in promotion.get("evidence_paths") or []})
+    if set(allowed) & {dfcore.flow_path(p, task) for p in promotion.get("writes") or []}:
+        raise dfcore.ConfigError("Foundation product/evidence scope overlaps promotion paths")
+    old_base = record.get("canonical_base") or pr["base_sha"]
+    changed = set(rem.changed_files(old_base, source)["files"])
+    if changed - set(allowed):
+        raise dfcore.ConfigError(f"the previous A contains files outside product/evidence scope: {sorted(changed - set(allowed))}")
+    # A moved base must never be copied over silently when both sides changed the same product.
+    theirs = set(rem.changed_files(old_base, canonical)["files"])
+    generated = set((work.get("generated") or []))
+    clashes = (changed & theirs) - generated
+    if clashes:
+        raise dfcore.ConfigError(f"Foundation rebase conflicts require a person: {sorted(clashes)}")
+    copy_tree(cached_tree(rem, canonical), REPO)
+    snapshot = tree_map(REPO)
+    source_tree = cached_tree(rem, source)
+    for path in sorted(changed):
+        src, dst = os.path.join(source_tree, path), os.path.join(REPO, path)
+        if os.path.isfile(src):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+        elif os.path.isfile(dst):
+            os.remove(dst)
+    work.update(base=canonical, parent=canonical, extra_parents=[], new_branch=True,
+                branch=dfcore.task_branch(task) + "-r-" + previous[:12],
+                supersedes={"number": pr["number"], "head": previous},
+                brought=sorted(changed))
+    return snapshot
+
+
 def main(argv):
     project, do = argv[0], argv[1]
     st = json.load(open(os.path.join(D, "state.json"), encoding="utf-8"))
@@ -129,7 +168,17 @@ def main(argv):
 
     work = {"stage": do, "branch": branch, "canonical": canonical, "round": hist["implement_rounds"],
             "at": time.time(), "brought": []}
-    if do == "prepare":
+    promotion = ((ev.get("flow") or {}).get("promotion") or {})
+    promotion_snapshot = None
+    if promotion and pr and do in ("prepare", "implement", "rebase"):
+        work["generated"] = list(impl.get("generated") or [])
+        promotion_snapshot = promotion_revision(rem, pr, task, promotion, canonical, work)
+        if do == "rebase":
+            json.dump(promotion_snapshot, open(os.path.join(D, "snapshot.json"), "w"), indent=0)
+            json.dump(work, open(os.path.join(D, "work.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+            emit(status="OK", stage=do, workspace=WS, prompt_prepare="", prompt_implement="", prompt_research="", round=work["round"])
+            return 0
+    elif do == "prepare":
         # a new branch from canonical, or — after a person answered what preparation asked — the
         # pull request that holds that preparation
         at = pr["head_sha"] if pr else canonical
@@ -187,7 +236,8 @@ def main(argv):
         emit(status="TOOL_FAILURE", stage=do, workspace=WS, error=f"unknown stage {do!r}")
         return 0
 
-    json.dump(tree_map(REPO), open(os.path.join(D, "snapshot.json"), "w"), indent=0)
+    json.dump(promotion_snapshot if promotion_snapshot is not None else tree_map(REPO),
+              open(os.path.join(D, "snapshot.json"), "w"), indent=0)
     refs = references(rem, impl)
     work["references"] = refs
     crit_files, crit_notes = criteria(pol, task)

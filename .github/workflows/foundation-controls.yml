@@ -1,0 +1,41 @@
+name: foundation-controls
+on: [pull_request, push]
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q lib steps controls.py
+  stack-controls:
+    runs-on: ubuntu-latest
+    container: python:3.13-bookworm
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: /work/stack:/work/stack/steps
+      PYTHONDONTWRITEBYTECODE: '1'
+      AGENTSTACK_CONTROLS_ROOT: /tmp/devflow-controls
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: devflow}
+      - uses: actions/checkout@v4
+        with:
+          repository: astro3141/agent-stack
+          ref: e805b2b5514a26c2770521549c2597f6653b75f2
+          path: stack
+      - run: pip install pyyaml requests
+      - name: Stage the real stack and this candidate in an isolated runtime
+        run: |
+          mkdir -p /work/packages/devflow /work/config/devflow/projects
+          cp -a stack/. /work/
+          cp -a devflow/. /work/packages/devflow/
+          cp devflow/tests/scanner-fixture.yaml /work/config/devflow/projects/scanner-fixture.yaml
+          mkdir -p /work/config/generated/egress/profiles
+          cp devflow/tests/research.allow /work/config/generated/egress/profiles/research.allow
+          cp devflow/tests/research.allow /work/config/generated/egress/profiles/research-review.allow
+      - name: Full controls, including Gate1, review rework, Gate2 and post-merge
+        run: python /work/packages/devflow/controls.py
