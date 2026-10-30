@@ -386,6 +386,53 @@ def materialize_hook(rem, pol, ref, dest):
     return got
 
 
+HOOK_BLOB_LIMIT = 1_000_000
+
+
+def _under(path, patterns):
+    import fnmatch
+    return any(path == w or path.startswith(w.rstrip("/") + "/") or fnmatch.fnmatch(path, w) for w in patterns)
+
+
+def hook_blobs(pol, files, base_text, head_text):
+    """The base and head contents of the changed files the policy's `hook.blob_paths` name, for the
+    hook's classify. What changed *inside* a file — a comment, executable code, a contract — is the
+    project's reading, and it needs the text, not only the path. Each side is read with the given
+    function; a file the policy does not name is left out; a side that is missing, not text, or over
+    HOOK_BLOB_LIMIT bytes is None — the hook reads an absent blob as unknown, never as unchanged."""
+    want = list((pol.get("hook") or {}).get("blob_paths") or [])
+    out = {}
+    for path in files:
+        if not want or not _under(path, want):
+            continue
+        row = {}
+        for side, get in (("base", base_text), ("head", head_text)):
+            try:
+                text = get(path)
+            except Exception:
+                text = None
+            if isinstance(text, bytes):
+                try:
+                    text = text.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = None
+            if text is not None and (not isinstance(text, str) or len(text.encode("utf-8")) > HOOK_BLOB_LIMIT):
+                text = None
+            row[side] = text
+        out[path] = row
+    return out
+
+
+def criteria_mapping_required(cls):
+    """Whether the hook asks for the criteria trace. A hook answers `required_evidence`: the kinds
+    of evidence this change needs (`criteria_mapping` among them when the official criteria must be
+    mapped); a hook that still answers only `trace_required` is read as before."""
+    kinds = cls.get("required_evidence")
+    if isinstance(kinds, list):
+        return "criteria_mapping" in kinds
+    return bool(cls.get("trace_required"))
+
+
 def run_hook(pol, hook_root, op, payload, timeout=120):
     """Call the project's hook: one JSON document in on stdin, one out on the last stdout line.
 
@@ -433,7 +480,7 @@ def validate_classification(pol, c):
         problems.append(f"task_type {c.get('task_type')!r} is not one of {types}")
     if not isinstance(c.get("impacts"), dict):
         problems.append("impacts is not a mapping")
-    for k in ("required_checks", "lenses"):
+    for k in ("required_checks", "lenses", "required_evidence", "notes"):
         if not isinstance(c.get(k, []), list):
             problems.append(f"{k} is not a list")
     for chk, why in (c.get("not_applicable") or {}).items():

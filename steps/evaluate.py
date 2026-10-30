@@ -289,14 +289,21 @@ def main(argv):
     touched_rules = sorted(f for f in changed["files"] if f in rule_paths or remote_mod.glob_any(f, pol.get("rule_paths") or []))
 
     try:
+        blobs = dfcore.hook_blobs(pol, changed["files"], lambda path: rem.file_at(pr["base_sha"], path),
+                                  lambda path: rem.file_at(pr["head_sha"], path)) if pr else {}
         cls = dfcore.run_hook(pol, hook_root, "classify", {
             "task": task, "changed_files": changed["files"], "authors": changed.get("authors") or [],
             "pr": {k: (pr or {}).get(k) for k in ("number", "author", "base_ref", "head_ref")} if pr else None,
-            "canonical_head": canonical_head})
+            "canonical_head": canonical_head, "blobs": blobs})
     except dfcore.HookError as e:
         ev["tool"].append(f"HookError: {e}")
         return done()
     cls.setdefault("impacts", {})
+    # what the project's reading says this change must show — shown with the state, judged below
+    ev["required_evidence"] = list(cls.get("required_evidence") or []) if isinstance(cls.get("required_evidence"), list) \
+        else (["criteria_mapping"] if cls.get("trace_required") else [])
+    for n in cls.get("notes") or []:
+        ev.setdefault("notes", []).append(f"classification: {n}")
     if touched_rules:
         cls["impacts"]["policy_change"] = True
         ev.setdefault("notes", []).append(f"the change edits the rules {touched_rules}; judged by the canonical rules at {canonical_head[:12]}")
@@ -507,7 +514,7 @@ def main(argv):
     # Trace, for a change whose meaning is affected: the hook validates it; the engine does not
     # read its content as a claim of conformance — a filled-in form is not a checked one.
     ev["trace"] = None
-    if cls.get("trace_required"):
+    if dfcore.criteria_mapping_required(cls):
         tpath = (pol.get("trace") or {}).get("path", ".devflow/tasks/{task}.yaml").format(task=task["id"])
         try:
             text = rem.file_at(pr["head_sha"], tpath)

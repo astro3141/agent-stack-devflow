@@ -1899,12 +1899,13 @@ def dfcore_mark():
 
 if __name__ == "__main__":
     sys.path.insert(0, os.path.join(PKG, "tests"))
-    from stack_foundation_scenarios import controls_foundation_pr
+    from stack_foundation_scenarios import controls_foundation_pr, controls_foundation_blobs
     for group in (controls_flow, controls_block, controls_stale, controls_foundation, controls_evidence,
                   controls_shared, controls_effects, controls_rules, controls_tool, controls_implement,
                   controls_auth):
         group()
     controls_foundation_pr(sys.modules[__name__])
+    controls_foundation_blobs(sys.modules[__name__])
     print("")
     print(f"{len(PASS_)}/{len(PASS_) + len(FAIL_)} controls")
     sys.exit(1 if FAIL_ else 0)

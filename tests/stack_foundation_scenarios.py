@@ -47,9 +47,40 @@ p.write_text(json.dumps(r, sort_keys=True))
 '''
 
 
-def database(ct):
+HOOK_BLOBS = '''import json, sys
+d = json.load(sys.stdin)
+o = {"protocol": "devflow-hook@1"}
+if d["op"] == "classify":
+    row = (d.get("blobs") or {}).get("collector/lib/core.sh") or {}
+    given = row.get("base") is not None and row.get("head") is not None
+    code = lambda t: [l for l in t.split("\\n") if l.strip() and not l.lstrip().startswith("#")]
+    if given and code(row["base"]) == code(row["head"]):
+        evidence, note = ["non_executable_change"], "collector/lib/core.sh: comment or blank lines only"
+    elif given:
+        evidence, note = ["criteria_mapping"], "collector/lib/core.sh: executable code changed"
+    else:
+        evidence, note = ["criteria_mapping"], "collector/lib/core.sh: base or head text not given"
+    violations = []
+    if d.get("pr") is None and "collector/lib/core.sh" in (d.get("changed_files") or []) and not given \\
+            and (d["policy"].get("hook") or {}).get("blob_paths"):
+        violations = ["delivery gave the hook no base text for collector/lib/core.sh"]
+    o.update(task_type="feature", change_class="FOUNDATION", impacts={}, floor="FOUNDATION",
+             required_checks=[], lenses=[], violations=violations, decisions=[], gaps=[], problems=[],
+             trace_required="criteria_mapping" in evidence, required_evidence=evidence, notes=[note],
+             shared_artifacts=[])
+elif d["op"] == "materials":
+    o.update(criteria=[], contracts=[], implementation=[])
+elif d["op"] == "validate_trace":
+    o.update(problems=["a change that affects meaning has no criterion mappings"], decisions=[], gaps=[])
+print(json.dumps(o))
+'''
+
+
+def database(ct, hook=HOOK, blob_paths=None):
     db = ct.impl_db()
     def policy(p):
+        if blob_paths is not None:
+            p.setdefault("hook", {})["blob_paths"] = blob_paths
         p["flows"] = {"FOUNDATION": "foundation_pr"}
         p["flow_defs"] = {"foundation_pr": {"kind": "pull_request", "promotion": {
             "command": ["python3", WRITER], "baseline_path": GUARD,
@@ -67,7 +98,7 @@ def database(ct):
     repo = ct.R(db)
     base = repo["branches"][ct.build.CANONICAL]
     repo["commits"][base]["files"].update({GUARD: 'EXPECTED_BASE="' + 'c' * 40 + '"\n',
-        WRITER: PROMOTE, ".devflow/hooks/scanner_hook.py": HOOK, "collector/lib/core.sh": "old\n"})
+        WRITER: PROMOTE, ".devflow/hooks/scanner_hook.py": hook, "collector/lib/core.sh": "old\n"})
     repo["post_merge_check_runs"] = ct.build.check_runs(["foundation-ci"])
     # FixtureRemote's tree cache, like Git, keys immutable objects by SHA. Other controls change
     # fixture policy in-place; give this different canonical tree its own content-derived identity.
@@ -167,8 +198,60 @@ def controls_foundation_pr(ct):
         s.close()
 
 
+def controls_foundation_blobs(ct):
+    """work fetches the tree as an archive (no .git): deliver must still give the hook the base
+    text, from the remote; evaluate validates the trace only when the hook asks for
+    criteria_mapping; a hook given no text asks for it as before."""
+    print("\nFoundation PR — the hook reads what changed inside the file, at delivery and at evaluation")
+    def ev(r):
+        return json.load(open(os.path.join(r["ws"], "devflow/evaluation.json")))
+    def model_for(head_text):
+        def model(stage, ws):
+            if stage == "prepare":
+                ct.write(ws, ".devflow/tasks/T-0054.yaml", "task: T-0054\nmappings: []\n")
+                ct.report(ws, stage, {"proceed": True, "summary": "Foundation scope", "decisions": [], "gaps": []})
+            else:
+                ct.write(ws, "collector/lib/core.sh", head_text)
+                ct.report(ws, stage, {"summary": "Foundation change", "tests": []})
+            return True
+        return model
+    def through(db, head_text):
+        s = ct.Sim(db)
+        try:
+            r = s.run()
+            s.edit(lambda d: ct.approve(d, "gate1", ev(r)["proposal_digest"]))
+            r = s.run_pass(model_for(head_text))
+            delivered = r.get("deliver", {}).get("delivered")
+            if delivered != "yes":
+                return delivered, r.get("deliver", {}).get("failure"), None, None
+            prior = ct.dfcore.read_state(ct.R(s.db)["issues"]["3"]["comments"], ct.remote_mod.FixtureRemote(s.path, ct.build.REPO).writer())
+            b = ct.R(s.db)["pulls"][str(prior["history"]["pr"])]["head_sha"]
+            s.edit(lambda d: ct.set_runs(d, b, ct.build.check_runs(["foundation-ci"])))
+            r = s.run()
+            return delivered, None, ev(r), r
+        finally:
+            s.close()
+    delivered, failure, e, r = through(database(ct, HOOK_BLOBS, ["collector"]), "old\n# the first Foundation through the lane\n")
+    ct.check("comment-only change: delivery gives the hook the base text from the remote (no .git in the tree)", (delivered, failure), ("yes", None))
+    if e:
+        ct.check("comment-only change: the hook asks no criterion mapping", e.get("required_evidence"), ["non_executable_change"])
+        ct.check("comment-only change: the trace is not validated, so an empty one does not fail the head", e.get("trace"), None)
+        ct.check("comment-only change: the hook's reading is shown with the state",
+                 any("comment or blank lines only" in n for n in r["state"].get("notes") or []), True)
+        ct.check("comment-only change: the head is not sent back for rework", ct.verdict(r) != "REQUEST_CHANGES", True)
+    delivered, failure, e, r = through(database(ct, HOOK_BLOBS, ["collector"]), "new\n")
+    ct.check("executable change: delivered, and the hook asks for the criterion mapping", (delivered, (e or {}).get("required_evidence")), ("yes", ["criteria_mapping"]))
+    if e:
+        ct.check("executable change: the empty trace fails the head as before", ct.verdict(r), "REQUEST_CHANGES")
+    delivered, failure, e, r = through(database(ct, HOOK_BLOBS, None), "old\n# comment\n")
+    ct.check("no blob_paths: the hook gets no text and asks for the mapping as before", (delivered, (e or {}).get("required_evidence")), ("yes", ["criteria_mapping"]))
+    if e:
+        ct.check("no blob_paths: unknown is never unchanged — the empty trace fails the head", ct.verdict(r), "REQUEST_CHANGES")
+
+
 if __name__ == "__main__":
     import controls
     controls_foundation_pr(controls)
+    controls_foundation_blobs(controls)
     print(f"{len(controls.PASS_)}/{len(controls.PASS_)+len(controls.FAIL_)} Foundation integration controls")
     raise SystemExit(bool(controls.FAIL_))
