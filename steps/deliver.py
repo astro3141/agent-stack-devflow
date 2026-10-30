@@ -68,12 +68,6 @@ def diff(snap, now):
     return out
 
 
-def canonical_text(canonical, path):
-    """A file's text at the canonical commit in the workspace clone; None when it is not there."""
-    p = subprocess.run(["git", "show", f"{canonical}:{path}"], cwd=REPO, capture_output=True, text=True, timeout=60)
-    return p.stdout if p.returncode == 0 else None
-
-
 def regenerate(cmds, timeout):
     """Run the project's generators in the tree. `python`/`python3` are this runtime's interpreter
     (the one the steps run under); nothing is run through a shell."""
@@ -184,10 +178,15 @@ def main(argv):
     if not authored:
         return finish(False, failure="the implementation changed nothing")
 
-    # the project's own reading of this change, before anything leaves the workspace
+    # the project's own reading of this change, before anything leaves the workspace. The base
+    # text comes from the remote: the workspace is a tree fetched as an archive, not a clone.
     hook_root = os.path.join(D, "policy")
     try:
-        blobs = dfcore.hook_blobs(pol, sorted(authored), lambda path: canonical_text(work["canonical"], path),
+        rem = dfcore.open_remote(reg, WS, PROXY)
+    except remote_mod.RemoteError as e:
+        return finish(False, failure=f"the remote could not be opened: {type(e).__name__}: {e}"[:300])
+    try:
+        blobs = dfcore.hook_blobs(pol, sorted(authored), lambda path: rem.file_at(work["canonical"], path),
                                   lambda path: open(os.path.join(REPO, path), encoding="utf-8").read())
         cls = dfcore.run_hook(pol, hook_root, "classify", {
             "task": task, "changed_files": sorted(authored), "authors": [dfcore.IMPLEMENTER],
@@ -245,7 +244,6 @@ def main(argv):
         report["promotion"] = {"record": record_path, "writes": promotion_writes,
                                "approved": approved, "evidence": actual_evidence}
     try:
-        rem = dfcore.open_remote(reg, WS, PROXY)
         now = rem.branch_head_or_none(branch)
         expect = None if work.get("new_branch") else work["parent"]
         promoted = bool(promotion and now != expect and own_promotion_push(rem, now, work))

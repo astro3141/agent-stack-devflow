@@ -37,7 +37,9 @@ evaluate    fix the frame: repository, base/head SHA, canonical head, workflow +
             Classify (hook, with the base/head text of the changed files `hook.blob_paths`
             name, so the project can read what changed inside a file, not only which file),
             gather checks on exactly the head, the trace when the hook's `required_evidence`
-            names `criteria_mapping`, the Plan operations,
+            names `criteria_mapping` (the one kind the engine verifies itself; the other kinds
+            are the classification's reading, shown with the state — the checks the policy
+            requires by class and impact stand regardless), the Plan operations,
             the reviews written against this head, the approvals given for it.
 route → review_plan → reviews   only when a required review is missing and a model may supply it:
             the platform's route + tasks.py, under the principal devflow-reviewer, which may write
