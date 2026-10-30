@@ -68,6 +68,12 @@ def diff(snap, now):
     return out
 
 
+def canonical_text(canonical, path):
+    """A file's text at the canonical commit in the workspace clone; None when it is not there."""
+    p = subprocess.run(["git", "show", f"{canonical}:{path}"], cwd=REPO, capture_output=True, text=True, timeout=60)
+    return p.stdout if p.returncode == 0 else None
+
+
 def regenerate(cmds, timeout):
     """Run the project's generators in the tree. `python`/`python3` are this runtime's interpreter
     (the one the steps run under); nothing is run through a shell."""
@@ -181,9 +187,11 @@ def main(argv):
     # the project's own reading of this change, before anything leaves the workspace
     hook_root = os.path.join(D, "policy")
     try:
+        blobs = dfcore.hook_blobs(pol, sorted(authored), lambda path: canonical_text(work["canonical"], path),
+                                  lambda path: open(os.path.join(REPO, path), encoding="utf-8").read())
         cls = dfcore.run_hook(pol, hook_root, "classify", {
             "task": task, "changed_files": sorted(authored), "authors": [dfcore.IMPLEMENTER],
-            "pr": None, "canonical_head": work["canonical"]})
+            "pr": None, "canonical_head": work["canonical"], "blobs": blobs})
     except dfcore.HookError as e:
         return finish(False, failure=f"the project's hook could not classify the change: {e}")
     if cls.get("violations"):

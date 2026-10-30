@@ -34,7 +34,10 @@ GitHub, not from anything this runner kept.
 ```
 evaluate    fix the frame: repository, base/head SHA, canonical head, workflow + policy digests,
             the blobs of the official criteria. Read the policy and run the hook from canonical.
-            Classify (hook), gather checks on exactly the head, the trace, the Plan operations,
+            Classify (hook, with the base/head text of the changed files `hook.blob_paths`
+            name, so the project can read what changed inside a file, not only which file),
+            gather checks on exactly the head, the trace when the hook's `required_evidence`
+            names `criteria_mapping`, the Plan operations,
             the reviews written against this head, the approvals given for it.
 route → review_plan → reviews   only when a required review is missing and a model may supply it:
             the platform's route + tasks.py, under the principal devflow-reviewer, which may write
