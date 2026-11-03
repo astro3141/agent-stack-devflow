@@ -99,6 +99,8 @@ def main(argv):
     mreviews, calls = model_reviews(ev, receipt) if ev.get("frame", {}).get("id") else ([], 0)
     reviews = dict(ev.get("reviews") or {})
     reviews["results"] = list(reviews.get("results") or []) + mreviews
+    # the rounds a send-back has spent by now, before the verdict weighs them against the limit
+    dfcore.count_rework(ev.setdefault("history", {}), (ev.get("frame") or {}).get("head_sha"))
     ctx = {"prepare": ev.get("prepare"), "gates": ev.get("gates"), "pr": ev.get("pr"),
            "checks": ev.get("checks"), "trace": ev.get("trace"), "reviews": reviews,
            "shared": ev.get("shared"), "finalize": ev.get("finalize"), "history": ev.get("history") or {},
@@ -129,10 +131,10 @@ def main(argv):
             # the granted round is spent by running, whatever it concluded
             hist["review_grants_spent"] = list(hist.get("review_grants_spent") or []) + [str(head or "")[:12]]
     if st["verdict"] == "REQUEST_CHANGES" and (st.get("wait") or {}).get("reason") != "budget":
-        # counted when the change goes back for rework; a head that only met the limit is not a
-        # round (it is counted when a grant sends it back)
+        # sent back for rework: the round is counted when a later head shows it ran
+        # (dfcore.count_rework); a head that only met the limit is not sent back until a grant does
         if hist.get("last_rc_head") != head:
-            hist["rework"] = int(hist.get("rework") or 0) + 1
+            hist["rework_pending"] = head
             hist["last_rc_head"] = head
         hist["last_blocking"] = ctx.get("_blocking_now") or []
         hist["no_progress"] = ctx.get("_no_progress") or 0

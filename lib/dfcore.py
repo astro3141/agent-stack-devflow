@@ -753,6 +753,25 @@ def classify_findings(findings):
 
 
 # ------------------------------------------------------------------------------ adjudication
+def count_rework(hist, head):
+    """The automatic rework rounds as they are spent, in place on `hist`: a head a verdict sent
+    back (`rework_pending`) is one round once a later pass judges another head — the round
+    produced something. Counting the send-back itself spent a round, and the person's grant that
+    paid for it, when the implementer never started (a provider over its limit; measured on
+    infra-scanner-io#40), and every later pass on that head then met the budget.
+
+    A history written by that counting (no `rework_pending` yet) has its last send-back counted
+    already: it is made pending again, so it is counted the same way — once, by the head after it."""
+    if "rework_pending" not in hist and hist.get("last_rc_head"):
+        hist["rework"] = max(0, int(hist.get("rework") or 0) - 1)
+        hist["rework_pending"] = hist["last_rc_head"]
+    pending = hist.get("rework_pending")
+    if pending and head and head != pending:
+        hist["rework"] = int(hist.get("rework") or 0) + 1
+        hist["rework_pending"] = None
+    return hist
+
+
 def adjudicate(ctx):
     """The state of a task, from what this run established. Deterministic; no model; no
     file-exists test; nothing an earlier attempt left behind.
@@ -766,7 +785,8 @@ def adjudicate(ctx):
       reviews   {required, results, independent_needed, independent_lenses}
       shared    {required, rebased, ops_match, detail}
       finalize  {post, delivery, passed_head, merge_commit}  — only for a merged pull request
-      history   {rework, no_progress, last_blocking, max_rework, max_no_progress}
+      history   {rework, no_progress, last_blocking, max_rework, max_no_progress} — rework as
+                count_rework() leaves it for this head
       tool      [errors]                      machinery that failed this run
       end_point integration | delivery
 

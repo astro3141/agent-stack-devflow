@@ -383,13 +383,31 @@ def controls_flow():
         r4 = s.run()
         check("an approver grants one more round for that head: REQUEST_CHANGES, back to implement",
               (verdict(r4), phase(r4)), ("REQUEST_CHANGES", "implement"))
+        r4b = s.run()
+        check("a pass on that head before the round produced anything (the implementer's provider was held): "
+              "still back to implement, the grant not spent (measured on infra-scanner-io#40)",
+              (verdict(r4b), phase(r4b), r4b["state"]["history"].get("rework")),
+              ("REQUEST_CHANGES", "implement", r4["state"]["history"].get("rework")))
         newer = s.edit(lambda db: build.push_new_head(db, {"items/kisa/U-54.yaml": "id: U-54\n# v3\n"}))
         s.edit(lambda db: set_runs(db, newer, fail_publish))
         r5 = s.run()
         check("the grant is spent by that round: the next failing head waits on the budget again",
               (verdict(r5), r5["state"]["wait"]["reason"]), ("REQUEST_CHANGES", "budget"))
+        check("that round is counted once, by the head it produced",
+              r5["state"]["history"].get("rework"), r4["state"]["history"].get("rework") + 1)
     finally:
         s.close()
+
+
+    # a history written when the send-back itself was counted: its last send-back is counted again
+    # only by the head after it — once, whether or not that head is already here
+    stuck = {"rework": 4, "max_rework": 1, "last_rc_head": "e483"}
+    check("an earlier counting's history, same head: the last send-back is pending, not spent",
+          (lambda h: (h["rework"], h["rework_pending"]))(dfcore.count_rework(dict(stuck), "e483")), (3, "e483"))
+    check("an earlier counting's history, a later head: counted once, as before",
+          (lambda h: (h["rework"], h["rework_pending"]))(dfcore.count_rework(dict(stuck), "f001")), (4, None))
+    check("and counting it again changes nothing",
+          dfcore.count_rework(dfcore.count_rework(dict(stuck), "f001"), "f001")["rework"], 4)
 
 
 # ================================================================================== block
