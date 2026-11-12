@@ -162,6 +162,10 @@ def propose(rem, reg, pol, impl, task, ev, st, hist):
     cfg = pol.get("propose") or {}
     ph = hist.setdefault("proposal", {})
     ph["rounds"] = int(ph.get("rounds") or 0) + 1
+    if prop.get("grant_pending"):
+        # this round is the one a person's grant for exactly these inputs pays for: spent now,
+        # whatever becomes of the round (a grant for other inputs stays unspent, and unused)
+        ph["grants_spent"] = list(ph.get("grants_spent") or []) + [prop["inputs_digest"]]
     json.dump(st, open(os.path.join(D, "state.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     base = prop.get("ref") or ev["canonical_head"]
     head = prop.get("head")

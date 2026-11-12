@@ -86,19 +86,29 @@ principals:
     # devflow's own record of it to devflow-proposal/<task id> (evaluate re-checks the pushed
     # commit). The providers and nothing else, like the implementer: a fact no merged research
     # record establishes is asked as research, never fetched or guessed.
+    #
+    # CEL, anchored, not `simple`: Preloop 0.15.0 evaluates a simple `.contains()` as a substring
+    # test, so '/proposal/proposal.md' also allowed <ws>/repo/**/proposal/proposal.md, paths that
+    # continue past it with ../ into the checkout, and paths outside the workspace root (evaluated
+    # with Preloop's own _evaluate_rule_condition, 2026-11-12). The pattern is the workspace root
+    # (config/environment.yaml workspace_root: /ws, shared with the filesystem MCP), one run-id
+    # segment that cannot be `.` or `..`, and the exact file. has() first: a call without `path`
+    # is a plain deny, not a CEL error (which Preloop turns into an approval request). What a static
+    # rule cannot say is *which* run: another run's /ws/<run>/proposal/proposal.md is allowed too —
+    # deliver reads only its own workspace, and pushes only what it validated there.
     egress_profile: closed
     description: >
       devflow's proposer. Reads the canonical checkout; writes only its proposal
-      (proposal/proposal.md) and its own report (devflow/propose.json).
+      (/ws/<run>/proposal/proposal.md) and its own report (/ws/<run>/devflow/propose.json).
     tool_rules:
       write_file:
         - action: allow
-          condition_type: simple
-          condition_expression: "args.path.contains('/proposal/proposal.md')"
+          condition_type: cel
+          condition_expression: "has(args.path) && args.path.matches('^/ws/[A-Za-z0-9_-]+/proposal/proposal[.]md$')"
           rule_description: the proposer writes its proposal
         - action: allow
-          condition_type: simple
-          condition_expression: "args.path.contains('/devflow/propose.json')"
+          condition_type: cel
+          condition_expression: "has(args.path) && args.path.matches('^/ws/[A-Za-z0-9_-]+/devflow/propose[.]json$')"
           rule_description: and its report
         - action: deny
           condition_type: simple
@@ -106,8 +116,8 @@ principals:
           rule_description: and nothing else
       edit_file:
         - action: allow
-          condition_type: simple
-          condition_expression: "args.path.contains('/proposal/proposal.md')"
+          condition_type: cel
+          condition_expression: "has(args.path) && args.path.matches('^/ws/[A-Za-z0-9_-]+/proposal/proposal[.]md$')"
           rule_description: the proposer revises its proposal
         - action: deny
           condition_type: simple

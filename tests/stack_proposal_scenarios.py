@@ -219,6 +219,36 @@ def controls_proposal(ct):
         s.close()
 
     # ---------------------------------------------------------------- the proposer's rights
+    # As declared for Preloop (principals.yaml). Each allow is `has(args.path) &&
+    # args.path.matches('<pattern>')`, first match wins; Python's re.search stands in for CEL's
+    # matches() here (both RE2-compatible anchored patterns). Preloop's own evaluator was run over
+    # the same cases when this was written (PR #9): the result was the same.
+    import re as _re
+    rules = yaml.safe_load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                             "principals.yaml"), encoding="utf-8"))["principals"]["devflow-proposer"]["tool_rules"]
+    shape = _re.compile(r"^has\(args\.path\) && args\.path\.matches\('(\^/ws/[^']+\$)'\)$")
+
+    def allowed(tool, path):
+        for r in rules[tool]:
+            if r["action"] == "deny" and not r.get("condition_expression"):
+                return False
+            m = shape.match(r.get("condition_expression") or "")
+            if r.get("condition_type") != "cel" or not m:
+                return None             # a rule this control does not understand: fail the check
+            if _re.search(m.group(1), path):
+                return r["action"] == "allow"
+        return False
+    w = "/ws/3f9a1c2b"
+    want = {f"{w}/proposal/proposal.md": (True, True), f"{w}/devflow/propose.json": (True, False),
+            f"{w}/repo/evaluator/evaluator.py": (False, False), f"{w}/repo/docs/proposal/proposal.md": (False, False),
+            f"{w}/proposal/proposal.md/../../repo/x.py": (False, False), f"{w}/devflow/propose.json/../../repo/x.py": (False, False),
+            f"{w}/repo/../proposal/proposal.md": (False, False), "/ws/../etc/proposal/proposal.md": (False, False),
+            f"{w}/proposal/proposal.md.sh": (False, False), "/tmp/x/proposal/proposal.md": (False, False),
+            "proposal/proposal.md": (False, False), f"{w}/devflow/state.json": (False, False)}
+    got = {p: (allowed("write_file", p), allowed("edit_file", p)) for p in want}
+    check("the proposer may write exactly its proposal and its report — no traversal, no checkout, nothing outside /ws",
+          [p for p in want if got[p] != want[p]], [])
+
     s = ct.Sim(proposal_db(ct))
     try:
         r = s.run_pass(proposer(touch="evaluator/check_registry.py"))
@@ -265,6 +295,43 @@ def controls_proposal(ct):
         s.edit(lambda db: comment(ct, db, f"/devflow approve propose {e['proposal']['inputs_digest']}"))
         r = s.run_pass(proposer())
         check("the grant buys one more drafting round", r["act"].get("do"), "propose")
+        r = s.run_pass(proposer())
+        check("and only one: the spent grant is kept, and nothing more is drafted",
+              (r["act"].get("do"), ev_of(r)["proposal"]["cap"], r["state"]["history"]["proposal"]["grants_spent"]),
+              ("none", 2, [e["proposal"]["inputs_digest"]]))
+        s.edit(lambda db: move(ct, db, {"docs/TECHNICAL_DESIGN_v0.3.md": "# TD v3\n"}))
+        r = s.run_pass(proposer())
+        check("a stale proposal after the spent grant waits for a new one (spent rounds still counted)",
+              (r["act"].get("do"), r["state"]["wait"]["reason"], ev_of(r)["proposal"]["cap"]), ("none", "decision", 2))
+    finally:
+        s.close()
+
+    # A grant is for the inputs it names. One given for inputs A and not yet used does not pay for a
+    # round once the inputs became B; B needs a grant of its own.
+    s = ct.Sim(proposal_db(ct, max_rounds=1))
+    try:
+        s.run_pass(proposer())
+        s.edit(lambda db: move(ct, db, {"docs/TECHNICAL_DESIGN_v0.3.md": "# TD A\n"}))
+        a = ev_of(s.run_pass(proposer()))["proposal"]["inputs_digest"]
+        s.edit(lambda db: comment(ct, db, f"/devflow approve propose {a}"))
+        s.edit(lambda db: move(ct, db, {"docs/TECHNICAL_DESIGN_v0.3.md": "# TD B\n"}))
+        r = s.run_pass(proposer())
+        b = ev_of(r)["proposal"]["inputs_digest"]
+        check("a grant for inputs A, unused when the inputs became B, does not draft B",
+              (a != b, r["act"].get("do"), r["state"]["wait"]["reason"],
+               r["state"]["wait"]["need"].startswith(f"`/devflow approve propose {b}`")),
+              (True, "none", "decision", True))
+        check("and it is not spent by that pass", r["state"]["history"]["proposal"].get("grants_spent") or [], [])
+        s.edit(lambda db: comment(ct, db, f"/devflow approve propose {b}"))
+        r = s.run_pass(proposer())
+        check("a grant for B drafts B, and is the one spent",
+              (r["act"].get("do"), (r.get("deliver") or {}).get("delivered"), r["state"]["history"]["proposal"]["grants_spent"]),
+              ("propose", "yes", [b]))
+        s.edit(lambda db: comment(ct, db, f"/devflow approve propose {b}"))
+        s.edit(lambda db: move(ct, db, {"docs/TECHNICAL_DESIGN_v0.3.md": "# TD C\n"}))
+        r = s.run_pass(proposer())
+        check("grants for B, however many, do not draft the next inputs C",
+              (r["act"].get("do"), r["state"]["wait"]["reason"]), ("none", "decision"))
     finally:
         s.close()
 

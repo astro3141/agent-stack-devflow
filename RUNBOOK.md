@@ -113,7 +113,7 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 | `/devflow approve <gate> <head sha>` | a gate bound to a head (e.g. `gate2`); when policy marks the gate `exact`, supply the full SHA, not its 12-character abbreviation |
 | `/devflow approve <gate> <proposal digest>` where the gate binds a written proposal (`propose`) | approves that exact proposal commit with its current inputs; a stale or scope-mismatched proposal is approved by nothing |
 | `/devflow revise proposal <proposal sha>` + lines of text | redraft that proposal with the request; a request about an older proposal does nothing |
-| `/devflow approve propose <inputs digest>` | one more drafting round past `propose.max_rounds` |
+| `/devflow approve propose <inputs digest>` | one more drafting round past `propose.max_rounds`, for exactly those inputs (the digest the wait names); if the inputs change first, it is not used — the new inputs need their own grant |
 | `/devflow approve rework <head sha>` | one more automatic rework round for that head, beyond `loop.max_rework` (and `implement.max_rounds`); spent by that round |
 | `/devflow approve reviews <head sha>` | one more round of model review for that head, past `reviews.budget.model_calls` and `reviews.max_rounds`; spent by the round it pays for — each comment is one round (post another when a new devflow or policy version asks for the head's reviews again) |
 | `/devflow except <check> <head sha> <reason and alternative evidence>` | a required check that could not run counts, for that head only; never a FAIL |

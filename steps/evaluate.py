@@ -168,7 +168,8 @@ def approvals(comments, pol, implementers):
         ok = c.get("user") in who_may and c.get("user") not in set(implementers["identities"])
         body = c.get("body") or ""
         for m in re.finditer(r"^/devflow approve ([a-z0-9_-]+) (\S+)\s*$", body, re.M):
-            got.append({"gate": m.group(1), "value": m.group(2), "by": c.get("user"), "counted": ok})
+            got.append({"gate": m.group(1), "value": m.group(2), "by": c.get("user"), "counted": ok,
+                        "comment": c.get("id")})
         for m in re.finditer(r"^/devflow except (\S+) (\S{7,40}) (.+)$", body, re.M):
             exc.append({"check": m.group(1), "head": m.group(2), "reason": m.group(3).strip(),
                         "by": c.get("user"), "counted": ok})
@@ -264,11 +265,20 @@ def evaluate_proposal(rem, pol, task, ev, ref, hook_digests, crit, others, impl,
         if out["status"] == "FRESH" and mine:
             out["status"] = "REVISION_REQUESTED"
             out["revision"] = mine[0]
-    # one more drafting round past propose.max_rounds per grant (`/devflow approve propose <inputs
-    # digest>`): the limit is a default, passing it is a person's decision. Each digest counts once,
-    # so the same comment, or the same grant repeated, buys one round and no more.
-    out["granted"] = len({a["value"][:12] for a in given if a["gate"] == "propose" and a["counted"]})
-    out["cap"] = cap + out["granted"]
+    # One more drafting round past propose.max_rounds per grant (`/devflow approve propose <inputs
+    # digest>`): the limit is a default, passing it is a person's decision — about the inputs it
+    # names. Rounds grants already paid for stay counted (history.proposal.grants_spent, one entry
+    # per round, recorded by work.py when it starts one); a grant not yet used pays only for a round
+    # on exactly those inputs, so a grant for inputs A never drafts inputs B. Each comment is one
+    # grant: a second comment for the same inputs is a second round.
+    spent = list(ph.get("grants_spent") or [])
+    given_here = len({a["comment"] for a in given if a["gate"] == "propose" and a["counted"]
+                      and a["value"][:12] == out["inputs_digest"]})
+    out["granted"] = len(spent)
+    out["grant_unspent"] = given_here > spent.count(out["inputs_digest"])
+    base_cap = cap + len(spent)
+    out["grant_pending"] = rounds >= base_cap and out["grant_unspent"]
+    out["cap"] = base_cap + (1 if out["grant_pending"] else 0)
     st = out["status"]
     url = f"{branch}:{md_path}" + (f" @ {head[:12]}" if head else "")
     if st in ("MISSING", "STALE", "REVISION_REQUESTED"):
