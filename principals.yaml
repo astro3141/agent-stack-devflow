@@ -77,6 +77,43 @@ principals:
           condition_expression: ""
           rule_description: and nothing else
 
+  devflow-proposer:
+    # Drafts the proposal a gate approves, before that gate (policy `propose`). It reads the
+    # canonical tree in the run's checkout and writes exactly one file in its workspace,
+    # proposal/proposal.md, and its report — never the checkout (/repo/), so not the product, the
+    # rules, the task block or an approval. That is enforced three times: these rules at the tool,
+    # deliver refusing any change to the checkout, and deliver pushing exactly the proposal and
+    # devflow's own record of it to devflow-proposal/<task id> (evaluate re-checks the pushed
+    # commit). The providers and nothing else, like the implementer: a fact no merged research
+    # record establishes is asked as research, never fetched or guessed.
+    egress_profile: closed
+    description: >
+      devflow's proposer. Reads the canonical checkout; writes only its proposal
+      (proposal/proposal.md) and its own report (devflow/propose.json).
+    tool_rules:
+      write_file:
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/proposal/proposal.md')"
+          rule_description: the proposer writes its proposal
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/devflow/propose.json')"
+          rule_description: and its report
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+      edit_file:
+        - action: allow
+          condition_type: simple
+          condition_expression: "args.path.contains('/proposal/proposal.md')"
+          rule_description: the proposer revises its proposal
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+
   devflow-researcher:
     # The research lane's role (task types research and survey). Its profile's hosts are primary
     # sources for how an operating system packages a product: the distributions' package indexes and

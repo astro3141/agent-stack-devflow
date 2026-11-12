@@ -175,6 +175,142 @@ def approvals(comments, pol, implementers):
     return got, exc
 
 
+REVISE = re.compile(r"^/devflow revise proposal (\S{7,40})[ \t]*$", re.M)
+
+
+def revisions(comments, pol, implementers):
+    """A person's request to redraft one proposal, on the issue:
+
+      /devflow revise proposal <proposal commit sha>
+      <what to change, in the lines that follow>
+
+    Bound to the proposal it was written about: a request about an older proposal asks nothing of
+    the current one. Counted only from an approver (approvals()); each comment once."""
+    who_may = set(pol.get("approvers") or [])
+    out = []
+    for c in comments:
+        body = c.get("body") or ""
+        m = REVISE.search(body)
+        if not m:
+            continue
+        out.append({"id": c.get("id"), "commit": m.group(1), "by": c.get("user"),
+                    "text": body[m.end():].strip()[:4000],
+                    "counted": c.get("user") in who_may and c.get("user") not in set(implementers["identities"])})
+    return out
+
+
+def evaluate_proposal(rem, pol, task, ev, ref, hook_digests, crit, others, impl, given):
+    """The proposal a gate that `binds: proposal` approves, judged at `ref` (canonical's head, or
+    after a merge the merged commit's first parent — so a Foundation that changes a file its
+    proposal depends on does not make its own approval stale by landing).
+
+    status: MISSING | INVALID | STALE | REVISION_REQUESTED | FRESH. Only a FRESH proposal whose
+    scope_files equal the task block's, with no open decision or research, can be approved; its
+    binding (commit, both blobs, base, current inputs) is part of the gate's digest."""
+    cfg = pol.get("propose") or {}
+    md_path, rec_path = dfcore.proposal_paths(pol, task)
+    branch = dfcore.proposal_branch(task)
+    ph = ev["history"].get("proposal") or {}
+    basis = dfcore.sha256(dfcore.canon(crit))[:12]
+    rounds, cap = int(ph.get("rounds") or 0), int(cfg.get("max_rounds") or 3)
+    out = {"active": True, "branch": branch, "path": md_path, "record_path": rec_path, "rounds": rounds,
+           "max_rounds": cap, "ref": ref, "status": None, "approvable": False, "problems": []}
+    head = rem.branch_head_or_none(branch)
+    out["head"] = head
+    rec = {}
+    if head is None:
+        out["status"] = "MISSING"
+    else:
+        c = rem.commit(head) or {}
+        parent = (c.get("parents") or [None])[0]
+        changed = rem.changed_files(parent, head)["files"] if parent else []
+        if head not in set(ph.get("pushed") or []):
+            out["problems"].append(f"{branch} is at {head[:12]}, a commit devflow did not record pushing")
+        if c.get("author") != dfcore.PROPOSER:
+            out["problems"].append(f"the proposal commit {head[:12]} is not authored by {dfcore.PROPOSER}")
+        if set(changed) - {md_path, rec_path}:
+            out["problems"].append(f"the proposal commit {head[:12]} changes more than the proposal: "
+                                   f"{sorted(set(changed) - {md_path, rec_path})[:6]}")
+        try:
+            rec = json.loads(rem.file_at(head, rec_path) or "{}")
+        except ValueError:
+            rec = {}
+        if rec.get("schema") != dfcore.PROPOSAL_SCHEMA or rec.get("task") != task.get("id"):
+            out["problems"].append(f"{rec_path} at {head[:12]} is not this task's proposal record")
+        out["status"] = "INVALID" if out["problems"] else None
+    asked = [q for q in rec.get("research") or [] if isinstance(q, dict) and q.get("id")]
+    answered_all, _closed = research_answers(rem, pol, ref, ev) if (asked or out["status"] is None) else (set(), {})
+    out["answered_all"] = sorted(answered_all)
+    recorded = rec.get("inputs") or {}
+    depends = {p: rem.blob_id(ref, p) or "absent" for p in (recorded.get("depends_on") or {})}
+    current = dfcore.proposal_inputs(task, pol["_digest"], hook_digests, basis, depends,
+                                     [q["id"] for q in asked if q["id"] in answered_all])
+    out["inputs"] = current
+    out["inputs_digest"] = dfcore.sha256(dfcore.canon(current))[:12]
+    if out["status"] is None:
+        out["changes"] = dfcore.proposal_input_changes(recorded, current)
+        out["status"] = "STALE" if out["changes"] else "FRESH"
+        out["binding"] = {"commit": head, "proposal_blob": rem.blob_id(head, md_path),
+                          "record_blob": rem.blob_id(head, rec_path), "canonical_base": rec.get("canonical_base"),
+                          "inputs": out["inputs_digest"]}
+        out["scope_files"] = sorted(str(p) for p in rec.get("scope_files") or [])
+        out["record"] = {k: rec.get(k) for k in ("round", "run", "canonical_base", "decisions", "summary")}
+        done = set(ph.get("revisions_consumed") or [])
+        asks = [r for r in revisions(others, pol, impl) if r["counted"] and r["id"] not in done]
+        mine = [r for r in asks if head.startswith(r["commit"])]
+        ignored = [r["id"] for r in asks if not head.startswith(r["commit"])]
+        if ignored:
+            ev.setdefault("notes", []).append(f"proposal revision request(s) {ignored[:5]} name another proposal than {head[:12]}: not applied")
+        if out["status"] == "FRESH" and mine:
+            out["status"] = "REVISION_REQUESTED"
+            out["revision"] = mine[0]
+    # one more drafting round past propose.max_rounds per grant (`/devflow approve propose <inputs
+    # digest>`): the limit is a default, passing it is a person's decision. Each digest counts once,
+    # so the same comment, or the same grant repeated, buys one round and no more.
+    out["granted"] = len({a["value"][:12] for a in given if a["gate"] == "propose" and a["counted"]})
+    out["cap"] = cap + out["granted"]
+    st = out["status"]
+    url = f"{branch}:{md_path}" + (f" @ {head[:12]}" if head else "")
+    if st in ("MISSING", "STALE", "REVISION_REQUESTED"):
+        why = {"MISSING": "no proposal yet",
+               "STALE": "the proposal is stale: " + "; ".join(out.get("changes") or []),
+               "REVISION_REQUESTED": f"{(out.get('revision') or {}).get('by')} asked for a revision of {str(head)[:12]}"}[st]
+        if rounds < out["cap"]:
+            out["act"] = why
+            out["wait"] = {"reason": "proposal", "blockers": [f"proposal: {why}"],
+                           "need": f"devflow drafts the proposal (round {rounds + 1} of {out['cap']}) at {branch}:{md_path}",
+                           "owner": "devflow proposer", "resume_when": "a proposal for the current inputs is on the branch"}
+        else:
+            out["wait"] = {"reason": "decision", "blockers": [f"proposal: {why}", f"proposal rounds spent: {rounds} of {out['cap']}"],
+                           "need": f"`/devflow approve propose {out['inputs_digest']}` grants one more drafting round "
+                                   "for these exact inputs — or a person changes the task",
+                           "owner": "an approver the policy names", "resume_when": "the grant is on the issue"}
+    elif st == "INVALID":
+        out["wait"] = {"reason": "proposal", "blockers": [f"proposal: {p}" for p in out["problems"]],
+                       "need": f"{branch} holds what devflow did not write: a person restores it to devflow's last proposal "
+                               f"({str((ph.get('pushed') or [''])[-1])[:12] or 'none'}) or deletes the branch",
+                       "owner": "a person", "resume_when": "the branch holds only devflow's proposal commits"}
+    else:   # FRESH
+        task_scope = sorted(str(p) for p in task.get("scope_files") or [])
+        add = sorted(set(out["scope_files"]) - set(task_scope))
+        remove = sorted(set(task_scope) - set(out["scope_files"]))
+        out["scope_mismatch"] = {"add": add, "remove": remove} if (add or remove) else None
+        decisions = [str(d) for d in rec.get("decisions") or []]
+        research = [q for q in asked if q["id"] not in answered_all]
+        ev["prepare"]["decisions"] += [f"proposal: {d}" for d in decisions]
+        ev["prepare"]["research"] += research
+        ev.setdefault("notes", []).append(
+            f"proposal {head[:12]} (round {rec.get('round')}) at {url}: scope {out['scope_files']}")
+        if out["scope_mismatch"]:
+            out["wait"] = {"reason": "task", "blockers": [
+                f"proposal scope differs from the task block's scope_files: add {add}, remove {remove}"],
+                "need": "record the proposal's scope_files in the task block — or ask for a revision with "
+                        f"`/devflow revise proposal {head[:12]}` and what to change",
+                "owner": "task owner", "resume_when": "the task block's scope_files equal the proposal's"}
+        out["approvable"] = not (out["scope_mismatch"] or decisions or research)
+    return out
+
+
 def main(argv):
     project, issue_no = argv[0], argv[1]
     fixture = argv[2] if len(argv) > 2 else ""
@@ -294,7 +430,11 @@ def main(argv):
         cls = dfcore.run_hook(pol, hook_root, "classify", {
             "task": task, "changed_files": changed["files"], "authors": changed.get("authors") or [],
             "pr": {k: (pr or {}).get(k) for k in ("number", "author", "base_ref", "head_ref")} if pr else None,
-            "canonical_head": canonical_head, "blobs": blobs})
+            "canonical_head": canonical_head, "blobs": blobs,
+            # whether a proposal will supply this task's scope (policy `propose`): a hook that
+            # requires scope_files may accept their absence until the proposal gives them — the
+            # engine still holds the gate until the task block's scope equals the proposal's
+            "proposal_requested": dfcore.proposal_mode(pol, task, task.get("change_class"))[0]})
     except dfcore.HookError as e:
         ev["tool"].append(f"HookError: {e}")
         return done()
@@ -355,12 +495,41 @@ def main(argv):
     if missing_approval_blobs:
         ev["prepare"]["problems"].append(
             f"the privileged flow approval paths are absent on canonical: {missing_approval_blobs}")
+    # Pre-Gate1 proposal (policy `propose`): where the change class requires one, or the task asks
+    # for one, the gate that binds the proposal approves a written proposal — its exact commit and
+    # blobs, the canonical state it was drafted on, its current inputs — not only the task block.
+    active, mode_problem = dfcore.proposal_mode(pol, task, cls.get("change_class"))
+    prop = {"active": False}
+    if active:
+        try:
+            # judged where its approval was given: before a merge that is canonical's head; after
+            # one, the merge commit's first parent — never the tree the change itself produced
+            prop_ref = approval_ref
+            if pr and pr.get("merged") and pr.get("merge_commit_sha") and approval_ref == canonical_head:
+                prop_ref = ((rem.commit(pr["merge_commit_sha"]) or {}).get("parents") or [approval_ref])[0]
+            elif flow_kind != "pull_request" and task.get("transaction_commit"):
+                # a Foundation a person published as A+B: judged where A was made, not after it
+                tx = rem.commit(str(task["transaction_commit"])) or {}
+                if tx.get("parents") and rem.contains(str(task["transaction_commit"]), canonical_head):
+                    prop_ref = tx["parents"][0]
+            prop_crit = crit if prop_ref == approval_ref else dfcore.criteria_blobs(rem, pol, prop_ref)
+            prop = evaluate_proposal(rem, pol, task, ev, prop_ref, hook_digests, prop_crit,
+                                     [c for c in comments if c["id"] not in mine], impl, given)
+        except remote_mod.RemoteError as e:
+            ev["tool"].append(f"RemoteError: {e}")
+            return done(assignments=[])
+        if mode_problem:
+            ev["prepare"]["problems"].append(mode_problem)
+            prop.pop("act", None)
+            prop["approvable"] = False
+    ev["proposal"] = prop
     # A proposal approval also binds the rules and workflow that give the approved scope meaning.
     # A policy transition therefore cannot silently reuse a gate1 comment made under the old lane.
     proposal_digest = dfcore.sha256(dfcore.canon({"task": task_digest, "policy": pol["_digest"],
                                                   "workflow": wf.get("digest"),
                                                   "hooks": hook_digests,
-                                                  "approval_blobs": approval_blobs}))[:12]
+                                                  "approval_blobs": approval_blobs,
+                                                  **({"proposal": prop.get("binding")} if active else {})}))[:12]
     ev["proposal_digest"] = proposal_digest
     ev["proposal_bindings"] = approval_blobs
 
@@ -413,6 +582,9 @@ def main(argv):
         accepted = (str(want),) if g.get("exact") else (str(want), str(want)[:12])
         hit = [a for a in given if a["gate"] == g["id"] and a["counted"] and want
                and a["value"] in accepted]
+        if g.get("binds") == "proposal" and prop.get("active") and not prop.get("approvable"):
+            # a missing, stale or mismatched proposal is approved by nothing, whatever a comment says
+            hit = []
         gate_state.append({"id": g["id"], "phase": g.get("phase", "prepare"), "binds": g.get("binds"),
                            "value": want, "exact": bool(g.get("exact")),
                            "approved": bool(hit), "by": [a["by"] for a in hit]})

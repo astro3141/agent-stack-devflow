@@ -1,6 +1,6 @@
 """devflow step: set up the implementer's workspace for this round.
 
-usage: work.py <project> <do>          do: prepare | implement | rebase | research (act.py)
+usage: work.py <project> <do>          do: prepare | implement | rebase | research | propose (act.py)
 
 Writes, under /ws/<run>/:
 
@@ -148,6 +148,72 @@ def promotion_revision(rem, pr, task, promotion, canonical, work):
     return snapshot
 
 
+PROPOSAL_DIR = os.path.join(WS, "proposal")
+PROPOSAL_FILE = os.path.join(PROPOSAL_DIR, "proposal.md")
+
+
+def propose(rem, reg, pol, impl, task, ev, st, hist):
+    """The proposer's round: the canonical tree at the commit the proposal is judged at (read
+    only — the proposer's rights do not reach repo/, and deliver refuses any change there), the
+    previous proposal to revise in proposal/proposal.md (the one file it may write, with its
+    report), and why it is drafted again: the inputs that changed, or a person's revision request.
+    Its rounds are counted apart from implementation's (`propose.max_rounds`)."""
+    prop = ev.get("proposal") or {}
+    cfg = pol.get("propose") or {}
+    ph = hist.setdefault("proposal", {})
+    ph["rounds"] = int(ph.get("rounds") or 0) + 1
+    json.dump(st, open(os.path.join(D, "state.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    base = prop.get("ref") or ev["canonical_head"]
+    head = prop.get("head")
+    work = {"stage": "propose", "branch": prop["branch"], "canonical": base, "round": ph["rounds"],
+            "at": time.time(), "brought": [], "base": base,
+            # a new branch starts on the canonical commit it was drafted from; a redraft goes on top
+            # of devflow's own last proposal, never over it
+            "parent": head or base, "extra_parents": [], "new_branch": head is None}
+    copy_tree(cached_tree(rem, base), REPO)
+    json.dump(tree_map(REPO), open(os.path.join(D, "snapshot.json"), "w"), indent=0)
+    shutil.rmtree(PROPOSAL_DIR, ignore_errors=True)
+    os.makedirs(PROPOSAL_DIR)
+    previous = (rem.file_at(head, prop["path"]) if head else None) or ""
+    if previous:
+        open(PROPOSAL_FILE, "w", encoding="utf-8").write(previous)
+    refs_ = references(rem, impl)
+    work["references"] = refs_
+    crit_files, crit_notes = criteria(pol, task)
+    work["criteria"] = {"files": crit_files, "notes": crit_notes}
+    p = cfg.get("instructions")
+    instr = (rem.file_at(base, p) if p else None) or "(the project gives no further instructions)"
+    fb = {"why": prop.get("act"), "status": prop.get("status"), "changes": prop.get("changes") or [],
+          "previous": head, "previous_record": prop.get("record") or {},
+          "revision_request": {k: (prop.get("revision") or {}).get(k) for k in ("id", "by", "text")}
+          if prop.get("revision") else None}
+    json.dump(fb, open(os.path.join(D, "feedback.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    rdir = research_dir(impl)
+    gates = [g for g in ((pol.get("human_gates") or {}).get((ev.get("classification") or {}).get("change_class")) or [])
+             if g.get("binds") == "proposal"]
+    values = {"TASK": task, "REPO": REPO, "WS": WS, "CANONICAL": base,
+              "CANONICAL_BRANCH": reg["canonical_branch"], "PROPOSAL_FILE": PROPOSAL_FILE,
+              "PREVIOUS": "proposal/proposal.md holds the previous proposal: revise it" if previous
+                          else "there is no previous proposal: proposal/proposal.md is yours to create",
+              "GATES": ", ".join(g["id"] for g in gates) or "(none)",
+              "REFERENCES": "\n".join(f"- {r['path']} — {r['ref']} @ {str(r['sha'])[:12]}, {r['files']} text files. {r['note']}"
+                                      for r in refs_ if r.get("sha")) or "(none)",
+              "RULE_PATHS": [reg["policy_path"]] + list(pol.get("rule_paths") or []),
+              "GENERATED": list(impl.get("generated") or []),
+              "CLASSIFICATION": ev.get("classification") or {},
+              "RESEARCH_DIR": rdir or "(the project keeps no research records)",
+              "RESEARCH_RECORDS": records(rdir), "FEEDBACK": fb,
+              "CRITERIA": "\n".join([f"- {p}" for p in crit_files] + [f"- note: {n}" for n in crit_notes]) or "(none)",
+              "PROJECT_INSTRUCTIONS": instr, "OUT": os.path.join(D, "propose.json")}
+    tpl = open(os.path.join(PKG, "prompts", "propose.md"), encoding="utf-8").read()
+    path = os.path.join(D, "prompt_propose.md")
+    open(path, "w", encoding="utf-8").write(fill(tpl, values))
+    json.dump(work, open(os.path.join(D, "work.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    emit(status="OK", stage="propose", workspace=WS, prompt_prepare="", prompt_implement="", prompt_research="",
+         prompt_propose=path, round=work["round"])
+    return 0
+
+
 def main(argv):
     project, do = argv[0], argv[1]
     st = json.load(open(os.path.join(D, "state.json"), encoding="utf-8"))
@@ -161,8 +227,11 @@ def main(argv):
     pr = st.get("pr")
     branch = dfcore.task_branch(task)
 
-    # the round counts from here, whatever becomes of it
     hist = st.setdefault("history", {})
+    if do == "propose":
+        return propose(rem, reg, pol, impl, task, ev, st, hist)
+
+    # the round counts from here, whatever becomes of it
     hist["implement_rounds"] = int(hist.get("implement_rounds") or 0) + 1
     json.dump(st, open(os.path.join(D, "state.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
@@ -176,7 +245,7 @@ def main(argv):
         if do == "rebase":
             json.dump(promotion_snapshot, open(os.path.join(D, "snapshot.json"), "w"), indent=0)
             json.dump(work, open(os.path.join(D, "work.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-            emit(status="OK", stage=do, workspace=WS, prompt_prepare="", prompt_implement="", prompt_research="", round=work["round"])
+            emit(status="OK", stage=do, workspace=WS, prompt_prepare="", prompt_implement="", prompt_research="", prompt_propose="", round=work["round"])
             return 0
     elif do == "prepare":
         # a new branch from canonical, or — after a person answered what preparation asked — the
@@ -229,7 +298,7 @@ def main(argv):
                 os.remove(dst)
             work["brought"].append(f)
         json.dump(work, open(os.path.join(D, "work.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-        emit(status="OK", stage=do, workspace=WS, prompt_prepare="", prompt_implement="", prompt_research="",
+        emit(status="OK", stage=do, workspace=WS, prompt_prepare="", prompt_implement="", prompt_research="", prompt_propose="",
              round=work["round"])
         return 0
     else:
@@ -283,10 +352,10 @@ def main(argv):
     json.dump(work, open(os.path.join(D, "work.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     emit(status="OK", stage=do, workspace=WS, prompt_prepare=prompts.get("prepare", ""),
          prompt_implement=prompts.get("implement", ""),
-         prompt_research=prompts.get(task.get("type"), "") if do == "research" else "", round=work["round"])
+         prompt_research=prompts.get(task.get("type"), "") if do == "research" else "", prompt_propose="", round=work["round"])
     return 0
 
 
 if __name__ == "__main__":
     # a crash is still an answer: every declared key, status TOOL_FAILURE and the reason (step.main)
-    sys.exit(step.main(lambda: main(sys.argv[1:]), stage="", workspace="", prompt_prepare="", prompt_implement="", prompt_research="", round=0, error="", failure_key="error"))
+    sys.exit(step.main(lambda: main(sys.argv[1:]), stage="", workspace="", prompt_prepare="", prompt_implement="", prompt_research="", prompt_propose="", round=0, error="", failure_key="error"))

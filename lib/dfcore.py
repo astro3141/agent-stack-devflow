@@ -51,11 +51,78 @@ RESEARCHER = "devflow-researcher"
 # identity of its own, so the review stays independent of the researcher.
 RESEARCH_REVIEWER = "devflow-research-reviewer"
 PR_MARK = "<!-- devflow:pr"
+# Who drafts a proposal before the gate that approves it (policy `propose`). A role of its own: it
+# reads the canonical tree and writes one proposal file in its workspace — never the checkout, the
+# task block, the rules or an approval. Its commits land only on devflow-proposal/<task id>.
+PROPOSER = "devflow-proposer"
+PROPOSER_EMAIL = "devflow-proposer@devflow.invalid"
+PROPOSAL_SCHEMA = "devflow/proposal@1"
+# What a proposal answers is the task as a person wrote it, less what the proposal itself proposes
+# (scope_files) and the links filled in as the task progresses. Leaving scope_files out is what
+# lets a person copy the proposal's scope into the task block without making the proposal stale.
+PROPOSAL_INPUT_EXCLUDE = ("issue", "pr", "transaction_commit", "scope_files")
 
 
 def task_branch(task):
     """The branch devflow implements a task on: devflow/<task id>, in git's safe characters."""
     return "devflow/" + re.sub(r"[^a-z0-9._-]+", "-", str(task.get("id", "")).lower()).strip("-.")
+
+
+def proposal_branch(task):
+    """Where a task's proposals are kept: one branch, only ever fast-forwarded, so every version a
+    person was shown stays in its history. Not under devflow/: git cannot hold devflow/<id> and
+    devflow/<id>/… at once."""
+    return "devflow-proposal/" + re.sub(r"[^a-z0-9._-]+", "-", str(task.get("id", "")).lower()).strip("-.")
+
+
+def proposal_paths(pol, task):
+    """(proposal text, its record) — the record is written by devflow, never by the model."""
+    md = str((pol.get("propose") or {}).get("path") or ".devflow/proposals/{task}.md").format(task=task["id"])
+    stem = md[:-3] if md.endswith(".md") else md
+    return md, stem + ".proposal.json"
+
+
+def proposal_mode(pol, task, change_class):
+    """(active, problem). A proposal is drafted before Gate1 for the change classes the policy names
+    (`propose.required_for` — the pilot is FOUNDATION), and for any other task that asks for one
+    (`proposal: true` in its block). It means something only where a prepare-phase gate binds the
+    proposal: a proposal no one approves is a document, not a gate."""
+    cfg = pol.get("propose") or {}
+    required = change_class in (cfg.get("required_for") or [])
+    if not (required or task.get("proposal") is True):
+        return False, None
+    gates = (pol.get("human_gates") or {}).get(change_class) or []
+    if not any(g.get("phase", "prepare") == "prepare" and g.get("binds") == "proposal" for g in gates):
+        return True, (f"the task asks for a proposal, but no prepare-phase gate of {change_class} binds one "
+                      "(human_gates: binds: proposal)")
+    if str(cfg.get("by") or "human") != "agent":
+        return True, "a proposal is required, but the policy lets no agent draft it (propose.by: agent)"
+    return True, None
+
+
+def proposal_inputs(task, policy_digest, hook_digests, basis, depends_on, research_answered):
+    """Everything a proposal was drafted from. When any of it changes the proposal is stale: drafted
+    again, and an approval of it is not an approval of the new one. The workflow's own digest is not
+    an input — a new devflow version re-asks Gate1 (proposal_digest) without redrafting."""
+    t = {k: v for k, v in task.items() if k not in PROPOSAL_INPUT_EXCLUDE}
+    return {"task": sha256(canon(t))[:12], "policy": policy_digest, "hooks": hook_digests or {},
+            "basis": basis, "depends_on": dict(sorted((depends_on or {}).items())),
+            "research_answered": sorted(research_answered or [])}
+
+
+def proposal_input_changes(recorded, current):
+    """What changed between the inputs a proposal recorded and the inputs now, in words."""
+    out = []
+    names = {"task": "the task block", "policy": "the project's policy", "hooks": "the project's hook",
+             "basis": "the pinned criteria or contracts", "research_answered": "the research answering its questions"}
+    for k, label in names.items():
+        if (recorded or {}).get(k) != current.get(k):
+            out.append(f"{label} changed")
+    before, now = (recorded or {}).get("depends_on") or {}, current.get("depends_on") or {}
+    moved = sorted(p for p in set(before) | set(now) if before.get(p) != now.get(p))
+    if moved:
+        out.append(f"files it depends on changed on canonical: {moved[:6]}")
+    return out
 
 # CI conclusions, sorted by what they say. A failed check is a statement about the code; a
 # cancelled or timed-out one is a statement about the machinery, and says nothing about the code.
@@ -839,6 +906,12 @@ def adjudicate(ctx):
         return out("prepare", None, wait=wait(
             "task", "fix the task block or the project configuration", "task owner",
             "the task block is valid"))
+    # a proposal that is missing, stale, asked to be revised, or does not match the task's scope:
+    # the gate that binds it cannot be approved yet (evaluate decides which, and says why)
+    pw = (ctx.get("proposal") or {}).get("wait")
+    if pw:
+        blockers.extend(pw.get("blockers") or [])
+        return out("prepare", pw.get("verdict"), wait=wait(pw["reason"], pw["need"], pw["owner"], pw["resume_when"]))
     for g in ctx.get("gates") or []:
         if g.get("phase") == "prepare" and not g.get("approved"):
             gate_value = str(g.get("value") or "")

@@ -14,6 +14,9 @@ changes nothing on the remote. Prints `do`:
   research   a task type the project routes to a lane of its own (`implement.modes`, e.g. research
              and survey): one model step as devflow-researcher writes a research record, first time
              and on rework alike
+  propose    a gate that binds a proposal is due and its proposal is missing, stale, or a person
+             asked for a revision: devflow-proposer drafts it on devflow-proposal/<task id>
+             (policy `propose`; independent of `implement.by` and of `implement: human`)
   none       anything else: a person, CI or a reviewer has the next move, or the project does not
              let devflow implement (policy `implement.by`), or the task says a person implements it
 
@@ -40,6 +43,15 @@ def decide(st, ev):
     pol = ev.get("policy_doc") or {}
     impl = pol.get("implement") or {}
     task = ev.get("task") or {}
+    # A proposal is drafted before the gate that approves it, whoever implements afterwards: it is
+    # not an implementation (`implement.by`, `implement: human` and the flow do not apply), and its
+    # rounds are its own (`propose.max_rounds`). evaluate says when one is due; adjudicate must
+    # have stopped on it — anything that stops a task earlier (a hold, an invalid block) comes first.
+    prop = ev.get("proposal") or {}
+    if prop.get("active") and prop.get("act") and (st.get("wait") or {}).get("reason") == "proposal":
+        if st.get("execution", {}).get("status") != "OK":
+            return "none", "this run's machinery failed; nothing is acted on"
+        return "propose", prop["act"]
     if (impl.get("by") or "human") != "agent":
         return "none", "the project's policy leaves implementation to a person (implement.by)"
     if str(task.get("implement") or "agent") != "agent":
