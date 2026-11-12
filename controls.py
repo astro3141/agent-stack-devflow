@@ -20,6 +20,9 @@ Groups, by the risk each pins:
   tool        a machinery failure is TOOL_FAILURE with no verdict — never a rejection
   implement   devflow prepares and implements within the canonical rules; what it may push, when it
               stops, whose branch it is
+  proposal    (tests/stack_proposal_scenarios.py) a proposal is drafted before the gate that binds it;
+              the gate approves its exact version, never a stale or mismatched one; the proposer
+              writes nothing but the proposal
 """
 import contextlib, copy, hashlib, io, json, os, secrets, shutil, subprocess, sys, tempfile
 
@@ -113,10 +116,12 @@ class Sim:
         r["adjudicate"] = step("adjudicate.py", [""], env)
         r["act"] = step("act.py", [], env)
         do = r["act"].get("do")
-        if do in ("prepare", "implement", "rebase", "research"):
+        if do in ("prepare", "implement", "rebase", "research", "propose"):
             r["work"] = step("work.py", [project, do], env)
             if r["work"].get("status") == "OK":
-                produced = {"prepare": "", "implement": "", "research": ""}
+                produced = {"prepare": "", "implement": "", "research": "", "propose": ""}
+                if do == "propose":
+                    produced["propose"] = str(bool(model and model("propose", ws)))
                 if do == "research":
                     produced["research"] = str(bool(model and model("research", ws)))
                 if do == "prepare":
@@ -126,7 +131,8 @@ class Sim:
                     produced["implement"] = str(bool(model and model("implement", ws)))
                 r["deliver"] = step("deliver.py", [project, do, produced["prepare"], "run-prep" if produced["prepare"] else "",
                                                    produced["implement"], "run-impl" if produced["implement"] else "",
-                                                   produced["research"], "run-res" if produced["research"] else ""], env)
+                                                   produced["research"], "run-res" if produced["research"] else "",
+                                                   produced["propose"], "run-prop" if produced["propose"] else ""], env)
         elif r["adjudicate"].get("integrate") == "yes" or r["adjudicate"].get("phase") == "done":
             r["integrate"] = step("integrate.py", [project], env)
         r["publish"] = step("publish.py", [project], env)
@@ -1918,12 +1924,14 @@ def dfcore_mark():
 if __name__ == "__main__":
     sys.path.insert(0, os.path.join(PKG, "tests"))
     from stack_foundation_scenarios import controls_foundation_pr, controls_foundation_blobs
+    from stack_proposal_scenarios import controls_proposal
     for group in (controls_flow, controls_block, controls_stale, controls_foundation, controls_evidence,
                   controls_shared, controls_effects, controls_rules, controls_tool, controls_implement,
                   controls_auth):
         group()
     controls_foundation_pr(sys.modules[__name__])
     controls_foundation_blobs(sys.modules[__name__])
+    controls_proposal(sys.modules[__name__])
     print("")
     print(f"{len(PASS_)}/{len(PASS_) + len(FAIL_)} controls")
     sys.exit(1 if FAIL_ else 0)

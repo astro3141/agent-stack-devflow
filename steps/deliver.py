@@ -1,6 +1,10 @@
 """devflow step: turn what the implementer wrote into a commit on the task's branch, and a pull request.
 
 usage: deliver.py <project> <stage> <prepare_produced> <prepare_run> <implement_produced> <implement_run>
+                  [<research_produced> <research_run> [<propose_produced> <propose_run>]]
+
+Stage `propose` is its own delivery (deliver_proposal): the proposal text and devflow's record of it,
+on devflow-proposal/<task id>, and nothing else.
 
 Reads the workspace work.py set up and what the model steps of this run produced. In order:
 
@@ -118,6 +122,10 @@ def main(argv):
     impl_run = argv[5] if len(argv) > 5 else ""
     res_ok = len(argv) > 6 and argv[6] == "True"
     res_run = argv[7] if len(argv) > 7 else ""
+    prop_ok = len(argv) > 8 and argv[8] == "True"
+    prop_run = argv[9] if len(argv) > 9 else ""
+    if stage == "propose":
+        return deliver_proposal(argv[0], prop_ok, prop_run)
     sp = os.path.join(D, "state.json")
     st = json.load(open(sp, encoding="utf-8"))
     ev = json.load(open(os.path.join(D, "evaluation.json"), encoding="utf-8"))
@@ -447,14 +455,164 @@ def deliver_research(project, reg, pol, impl, task, ev, st, hist, work, snap, re
     return finish(True)
 
 
-def own_push(rem, sha, work):
+PROPOSAL_FILE = os.path.join(WS, "proposal", "proposal.md")
+PROPOSAL_MAX_BYTES = 200_000
+SAFE_PATH = re.compile(r"^(?!/)(?!.*(?:^|/)\.\.(?:/|$))[^\s\\]+$")
+
+
+def _paths(v, what, problems):
+    if not isinstance(v, list) or not all(isinstance(p, str) and SAFE_PATH.match(p) for p in v):
+        problems.append(f"{what} must be a list of repository-relative paths")
+        return []
+    return sorted(dict.fromkeys(v))
+
+
+def deliver_proposal(project, produced, run):
+    """The proposal, pushed — and nothing else. Two files on devflow-proposal/<task id>: the text
+    the proposer wrote in its workspace (proposal/proposal.md), and the record devflow writes
+    itself (what the proposal was drafted from, the scope it proposes, its questions). Refused when
+    the proposer changed the checkout, when its report is malformed, or when the branch is not
+    where devflow left it. Never forced, never a pull request: a person reads it on the branch,
+    and the gate that binds it approves its exact commit."""
+    sp = os.path.join(D, "state.json")
+    st = json.load(open(sp, encoding="utf-8"))
+    ev = json.load(open(os.path.join(D, "evaluation.json"), encoding="utf-8"))
+    work = json.load(open(os.path.join(D, "work.json"), encoding="utf-8"))
+    snap = json.load(open(os.path.join(D, "snapshot.json"), encoding="utf-8"))
+    pol = ev.get("policy_doc") or {}
+    task = ev["task"]
+    prop = ev.get("proposal") or {}
+    reg = dfcore.registration(project)
+    hist = st.setdefault("history", {})
+    ph = hist.setdefault("proposal", {})
+    report = {"stage": "propose", "round": work.get("round"), "at": time.time()}
+
+    def finish(ok, **kw):
+        report.update(kw, ok=ok)
+        log = list(ph.get("log") or [])
+        log.append({k: report.get(k) for k in ("round", "ok", "failure", "head", "inputs", "why", "revision")}
+                   | {"run": RUN})
+        ph["log"] = log[-20:]
+        if not ok:
+            st["blockers"] = list(st.get("blockers") or []) + [f"devflow proposal round {work.get('round')}: {kw.get('failure')}"]
+            st.update(phase="prepare", verdict=None, progress="waiting",
+                      wait={"reason": "proposal", "need": "devflow's next proposal round, or a person",
+                            "owner": "devflow proposer", "resume_when": "a proposal for the current inputs is on the branch"})
+            st["next"] = st["wait"]["need"]
+        st["delivery"] = report
+        json.dump(st, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        json.dump(report, open(os.path.join(D, "delivery.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        step.out(**{"status": "OK", "delivered": "yes" if ok and report.get("head") else "no",
+                    "head": report.get("head") or "", "pr": "", "hold": "", "failure": report.get("failure") or "",
+                    "error": ""})
+        return 0
+
+    report["why"] = prop.get("act")
+    if run:
+        ph["sessions"] = sorted(set(ph.get("sessions") or []) | {run})
+    # 1. the proposer reads the checkout; it changes nothing there (its rights say so, and so does this)
+    touched = sorted(diff(snap, tree_map(REPO)))
+    if touched:
+        return finish(False, failure=f"the proposer changed the checkout, which it may only read: {touched[:8]}")
+    if not produced:
+        return finish(False, failure="the proposer produced no propose.json in this attempt")
+    out = read_json(os.path.join(D, "propose.json")) or {}
+    try:
+        text = open(PROPOSAL_FILE, "rb").read()
+        text.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return finish(False, failure=f"the proposal text is missing or not UTF-8 ({type(e).__name__})")
+    if not text.strip() or len(text) > PROPOSAL_MAX_BYTES:
+        return finish(False, failure=f"the proposal text is empty or larger than {PROPOSAL_MAX_BYTES} bytes")
+    problems = []
+    scope = _paths(out.get("scope_files"), "scope_files", problems)
+    depends = _paths(out.get("depends_on") or [], "depends_on", problems)
+    decisions = out.get("decisions") or []
+    research = out.get("research") or []
+    if not isinstance(decisions, list) or not all(isinstance(d, str) for d in decisions):
+        problems.append("decisions must be a list of strings")
+    if not isinstance(research, list) or not all(isinstance(q, dict) and q.get("id") and q.get("question") for q in research):
+        problems.append("research must be a list of {id, question, ...}")
+    if not scope and not problems:
+        problems.append("the proposal names no scope_files")
+    if problems:
+        return finish(False, failure="the proposer's report is malformed: " + "; ".join(problems))
+    md_path, rec_path = prop["path"], prop["record_path"]
+    rules = [reg["policy_path"]] + list(pol.get("rule_paths") or []) + list((pol.get("hook") or {}).get("files") or [])
+    if matches(md_path, rules) or matches(rec_path, rules):
+        return finish(False, failure=f"the proposal path {md_path} is one of the project's rule paths: change propose.path")
+    try:
+        rem = dfcore.open_remote(reg, WS, PROXY)
+        base = work["canonical"]
+        # what it depends on is what it read and what it would change: a change to any of those on
+        # canonical makes it stale (evaluate compares these blobs at the commit it judges at)
+        dep_blobs = {p: rem.blob_id(base, p) or "absent" for p in sorted(set(depends) | set(scope))}
+        answered = set(prop.get("answered_all") or [])
+        cur = prop.get("inputs") or {}
+        inputs = dfcore.proposal_inputs(task, cur.get("policy"), cur.get("hooks"), cur.get("basis"), dep_blobs,
+                                        [q["id"] for q in research if q["id"] in answered])
+        report["inputs"] = dfcore.sha256(dfcore.canon(inputs))[:12]
+        revision = prop.get("revision") if prop.get("status") == "REVISION_REQUESTED" else None
+        report["revision"] = (revision or {}).get("id")
+        record = {"schema": dfcore.PROPOSAL_SCHEMA, "task": task["id"], "issue": task.get("issue"),
+                  "round": work.get("round"), "run": RUN, "drafted_by": dfcore.PROPOSER,
+                  "canonical_branch": reg["canonical_branch"], "canonical_base": base,
+                  "workflow": (ev.get("frame") or {}).get("workflow"),
+                  "inputs": inputs, "inputs_digest": report["inputs"],
+                  "why": prop.get("act"), "revises": prop.get("head"),
+                  "revision_request": {k: revision.get(k) for k in ("id", "by")} if revision else None,
+                  "summary": str(out.get("summary") or "")[:2000],
+                  "scope_files": scope, "depends_on": sorted(dep_blobs), "decisions": decisions,
+                  "research": research, "proposal_path": md_path}
+        blobs = {md_path: (text, "100644"),
+                 rec_path: ((json.dumps(record, ensure_ascii=False, indent=1, sort_keys=True) + "\n").encode(), "100644")}
+        branch = work["branch"]
+        now = rem.branch_head_or_none(branch)
+        expect = None if work.get("new_branch") else work["parent"]
+        landed = now != expect and own_push(rem, now, work, dfcore.PROPOSER)
+        if now != expect and not landed:
+            return finish(False, failure=f"branch {branch} is at {str(now)[:12]}, not at {str(expect)[:12]}: "
+                                         "someone else moved it; devflow does not overwrite it")
+        title = f"{task['id']}: proposal round {work.get('round')}"
+        message = (f"{title}\n\n{str(out.get('summary') or '')[:1500]}\n\n"
+                   f"Devflow-Task: {task['id']}\nDevflow-Run: {RUN}\nDevflow-Proposal-Inputs: {report['inputs']}\n")
+        author = {"name": dfcore.PROPOSER, "email": dfcore.PROPOSER_EMAIL,
+                  "date": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        head = now if landed else rem.push_commit(branch, work["parent"], blobs, message, author,
+                                                  base=work["parent"], branch_expected=expect)
+        # what was pushed is checked, not assumed: exactly the two files, on devflow's own parent
+        got = sorted(rem.changed_files(work["parent"], head)["files"])
+        if got != sorted(blobs):
+            # not recorded as devflow's: the next evaluation calls the branch INVALID, for a person
+            return finish(False, failure=f"the pushed proposal commit {head[:12]} changes {got[:8]}, not exactly {sorted(blobs)}")
+    except remote_mod.RemoteError as e:
+        report["tool"] = f"{type(e).__name__}: {e}"[:300]
+        st["execution"] = {"status": "TOOL_FAILURE", "errors": list((st.get("execution") or {}).get("errors") or []) + [report["tool"]]}
+        return finish(False, failure=f"the remote refused the proposal: {report['tool']}")
+    ph["pushed"] = list(ph.get("pushed") or []) + ([head] if head not in (ph.get("pushed") or []) else [])
+    if revision:
+        ph["revisions_consumed"] = sorted(set(ph.get("revisions_consumed") or []) | {revision["id"]})
+    report["head"] = head
+    st["publish_status"] = False
+    st["blockers"] = []
+    gates = ", ".join(g["id"] for g in ev.get("gates") or [] if g.get("binds") == "proposal") or "the proposal gate"
+    st.update(phase="prepare", verdict=None, progress="waiting",
+              wait={"reason": "proposal", "need": f"read the proposal at {branch}:{md_path} @ {head[:12]}; the next pass "
+                                                  f"asks {gates} for its exact digest (or `/devflow revise proposal {head[:12]}`)",
+                    "owner": "an approver the policy names", "resume_when": "the next pass"})
+    st["notes"] = [f"devflow pushed proposal {head[:12]} to {branch} (round {work.get('round')}; inputs {report['inputs']})"]
+    st["next"] = st["wait"]["need"]
+    return finish(True)
+
+
+def own_push(rem, sha, work, author=dfcore.IMPLEMENTER):
     """Whether the branch's head is this run's own push — made by an earlier attempt of this step
     whose answer was lost, or before a stop this run was resumed from (agent-stack §84: a resume
     re-enters the step from its start). Its message names this run, its author is devflow's
     implementer, and it sits on the parent this attempt would have pushed onto. Anything else on
     the branch is someone else's."""
     c = rem.commit(sha)
-    return bool(c) and f"Devflow-Run: {RUN}" in c["message"] and c["author"] == dfcore.IMPLEMENTER \
+    return bool(c) and f"Devflow-Run: {RUN}" in c["message"] and c["author"] == author \
         and c["parents"][:1] == [work["parent"]]
 
 

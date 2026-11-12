@@ -88,6 +88,11 @@ The state comment ends with `waiting (<reason>): <need> · owner: <who> · resum
 | `decision` | merged outside the workflow / merged head ≠ judged head | review the merged change, or revert |
 | `contract_gap` | analyse the gap; is a Foundation needed? | a Foundation task (it has its own gates), or narrow the task |
 | `task` | fix the task block or the project configuration | the blocker names the field |
+| `proposal` | devflow drafts the proposal | nothing — the next pass drafts it (round n of `propose.max_rounds`) |
+| `proposal` | read the proposal at `devflow-proposal/<task>:<path>` | read it; the next pass asks the gate for its exact digest — or `/devflow revise proposal <sha>` with what to change |
+| `proposal` | the proposal branch holds what devflow did not write | restore the branch to devflow's last proposal commit, or delete it |
+| `task` | record the proposal's scope_files in the task block | copy them (the proposal stays current), or ask for a revision |
+| `decision` | `/devflow approve propose <inputs digest>` | the proposal rounds are spent: grant one more, or change the task |
 | `implementation` | devflow's next round, or a person | nothing, if `implement: agent` and rounds are left — the next pass acts; otherwise push the fix |
 | `implementation` | bring the change onto the canonical head by hand | the same files changed on both sides: merge them yourself |
 | `verification` | CI on the head | nothing — devflow-auto waits for the checks itself |
@@ -106,6 +111,9 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 | `/devflow approve <gate> <task digest>` | a gate bound only to the task (for policies that explicitly use `binds: task`) |
 | `/devflow approve <gate> <proposal digest>` | a proposal gate bound to the exact task plus canonical policy/workflow/hook and any configured operational-control blobs; use this for a Foundation Gate1 so a contract transition invalidates older approval |
 | `/devflow approve <gate> <head sha>` | a gate bound to a head (e.g. `gate2`); when policy marks the gate `exact`, supply the full SHA, not its 12-character abbreviation |
+| `/devflow approve <gate> <proposal digest>` where the gate binds a written proposal (`propose`) | approves that exact proposal commit with its current inputs; a stale or scope-mismatched proposal is approved by nothing |
+| `/devflow revise proposal <proposal sha>` + lines of text | redraft that proposal with the request; a request about an older proposal does nothing |
+| `/devflow approve propose <inputs digest>` | one more drafting round past `propose.max_rounds`, for exactly those inputs (the digest the wait names); if the inputs change first, it is not used — the new inputs need their own grant |
 | `/devflow approve rework <head sha>` | one more automatic rework round for that head, beyond `loop.max_rework` (and `implement.max_rounds`); spent by that round |
 | `/devflow approve reviews <head sha>` | one more round of model review for that head, past `reviews.budget.model_calls` and `reviews.max_rounds`; spent by the round it pays for — each comment is one round (post another when a new devflow or policy version asks for the head's reviews again) |
 | `/devflow except <check> <head sha> <reason and alternative evidence>` | a required check that could not run counts, for that head only; never a FAIL |
@@ -117,6 +125,7 @@ Counted only from someone the policy lists under `approvers`, who did not implem
 | automatic reworks | `loop.max_rework` | the verdict stays REQUEST_CHANGES, waiting `budget`; `/devflow approve rework` grants one more |
 | same blocker, no progress | `loop.max_no_progress` | NEEDS_DECISION |
 | implementation rounds (incl. failed ones) | `implement.max_rounds` | devflow stops acting; the reason is on the issue |
+| proposal drafting rounds | `propose.max_rounds` | waiting `decision`: `/devflow approve propose <inputs digest>` grants one more |
 | model calls per task | `reviews.budget.model_calls` | waiting `budget`: a person reviews, or `/devflow approve reviews` grants one more model round |
 | review rounds per task | `reviews.max_rounds` | waiting `budget`: a person reviews, or `/devflow approve reviews` grants one more model round |
 | a pass's wall time | the workflow's `timeout_seconds` | the pass ends; start again |

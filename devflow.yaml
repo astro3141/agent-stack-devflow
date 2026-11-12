@@ -9,6 +9,7 @@
 #                  │                                            └──────▶ implement_agent ◀──────┤
 #                  │                                                          └─▶ deliver ◀──────┘
 #                  ├─research (task types in implement.modes)─▶ route_impl ─▶ work ─▶ research_agent ─▶ deliver
+#                  ├─propose (a gate binds a proposal that is due)─▶ route_impl ─▶ work ─▶ propose_agent ─▶ deliver
 #                  ├─rebase──────────────────────────────────────▶ work ─────▶ deliver ─┐
 #                  ├─PASS on head / done─▶ integrate ────────────────────────────────────┤
 #                  └───────────────────────────────────────────────────────────────────▶ publish ─▶ record ─▶ ended_*
@@ -24,6 +25,11 @@
 # profile carries web hosts (agent-stack §53–§55) — writing a record into the project's research
 # directory and nothing else. It is reviewed and merged like any change; item tasks then build on
 # the merged records, and their implementer (profile `closed`: the providers only) fetches nothing.
+# A proposal comes before the gate that approves it (policy `propose`; the pilot is Foundation's
+# gate1): one model step as devflow-proposer reads the canonical tree and writes one proposal file;
+# deliver pushes it with devflow's record of what it was drafted from to devflow-proposal/<task id>,
+# and the gate binds that exact commit. Its rounds are its own (`propose.max_rounds`), and it runs
+# whoever implements afterwards.
 # Every devflow model step runs as a role whose egress profile decides its network. Where a call
 # runs is not the workflow's to choose: agent_task.py hands a principal with an egress_profile to
 # the broker itself (agent-stack docs/packages.md, one door). Until the stack did, these steps
@@ -219,7 +225,7 @@ agents:
       error: {type: string}
     routes:
       - to: route_impl
-        when: "{{ act.output.do in ['prepare', 'implement', 'research'] }}"
+        when: "{{ act.output.do in ['prepare', 'implement', 'research', 'propose'] }}"
       - to: work
         when: "{{ act.output.do == 'rebase' }}"
       - to: integrate
@@ -258,6 +264,7 @@ agents:
       prompt_prepare: {type: string}
       prompt_implement: {type: string}
       prompt_research: {type: string}
+      prompt_propose: {type: string}
       round: {type: number}
       error: {type: string}
     routes:
@@ -267,6 +274,8 @@ agents:
         when: "{{ work.output.status == 'OK' and work.output.stage == 'implement' }}"
       - to: research_agent
         when: "{{ work.output.status == 'OK' and work.output.stage == 'research' }}"
+      - to: propose_agent
+        when: "{{ work.output.status == 'OK' and work.output.stage == 'propose' }}"
       - to: deliver
         when: "{{ work.output.status == 'OK' and work.output.stage == 'rebase' }}"
       - to: publish
@@ -315,6 +324,19 @@ agents:
           total_tokens: {type: number, required: false}
           wall_ms: {type: number, required: false}
           model_usage: {type: array, required: false}
+    routes:
+      - to: deliver
+
+  - name: propose_agent
+    type: script
+    description: 제안 — the proposal a gate approves, before that gate, as devflow-proposer (reads canonical; writes one file)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/stack/steps/agent_task.py", "{{ route_impl.output.provider }}",
+           "{{ route_impl.output.model_route }}", "propose", "{{ work.output.prompt_propose }}",
+           "devflow/propose.json", "{{ route_impl.output.profile }}", "{{ route_impl.output.login }}",
+           "devflow-proposer"]
+    timeout: 3700
+    output: *agent_out
     routes:
       - to: deliver
 
@@ -367,7 +389,9 @@ agents:
            "{% if implement_agent is defined %}{{ implement_agent.output.produced }}{% endif %}",
            "{% if implement_agent is defined %}{{ implement_agent.output.run_id }}{% endif %}",
            "{% if research_agent is defined %}{{ research_agent.output.produced }}{% endif %}",
-           "{% if research_agent is defined %}{{ research_agent.output.run_id }}{% endif %}"]
+           "{% if research_agent is defined %}{{ research_agent.output.run_id }}{% endif %}",
+           "{% if propose_agent is defined %}{{ propose_agent.output.produced }}{% endif %}",
+           "{% if propose_agent is defined %}{{ propose_agent.output.run_id }}{% endif %}"]
     timeout: 1500
     output:
       status: {type: string}
@@ -427,7 +451,7 @@ agents:
     # every model call the judgement rests on: the reviews' receipt, and the preparer's,
     # implementer's and researcher's calls (the recorder also finds them by their evidence
     # directories, agent-stack #22; listing them says these are this run's work)
-    stdin: "{{ {'executions': ([prepare_agent.output] if prepare_agent is defined else []) + ([implement_agent.output] if implement_agent is defined else []) + ([research_agent.output] if research_agent is defined else []), 'receipts': ([reviews.output.receipt] if reviews is defined else []), 'check': {'decision': publish.output.verdict, 'reason': (publish.output.next or adjudicate.output.reason), 'file_sha256': ''}, 'evidence_file': publish.output.evidence_index, 'measurements': {'model_calls': adjudicate.output.model_calls}, 'route': (route.output if route is defined else {'decision': 'NOT_NEEDED', 'reason': 'no model review was needed or allowed in this run'})} | tojson }}"
+    stdin: "{{ {'executions': ([prepare_agent.output] if prepare_agent is defined else []) + ([implement_agent.output] if implement_agent is defined else []) + ([research_agent.output] if research_agent is defined else []) + ([propose_agent.output] if propose_agent is defined else []), 'receipts': ([reviews.output.receipt] if reviews is defined else []), 'check': {'decision': publish.output.verdict, 'reason': (publish.output.next or adjudicate.output.reason), 'file_sha256': ''}, 'evidence_file': publish.output.evidence_index, 'measurements': {'model_calls': adjudicate.output.model_calls}, 'route': (route.output if route is defined else {'decision': 'NOT_NEEDED', 'reason': 'no model review was needed or allowed in this run'})} | tojson }}"
     output:
       mlflow_run_id: {type: string}
       experiment_id: {type: string}

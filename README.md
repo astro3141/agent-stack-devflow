@@ -47,8 +47,10 @@ route → review_plan → reviews   only when a required review is missing and a
 adjudicate  phase, progress (active / waiting / stopped + reason, need, owner, resume condition),
             execution (OK / TOOL_FAILURE), reviews (complete / incomplete / not_required), verdict.
 act         whether devflow's implementer acts now: the policy says `implement.by: agent`, the task
-            says `implement: agent`, the verdict sent it to implementation, and rounds are left.
+            says `implement: agent`, the verdict sent it to implementation, and rounds are left —
+            or, before a gate that binds a proposal, whether the proposer drafts it (below).
 work → prepare_agent → proceed → implement_agent → deliver     when it acts (below)
+work → propose_agent → deliver                                 a proposal before its gate (below)
 integrate   PASS on the head: re-check the head, take the shared-artifact lock, re-check canonical,
             then merge (merge_by: agent) or hand to the merge owner (merge_by: human). After the merge
             and the post-merge checks: release the lock.
@@ -90,6 +92,41 @@ research directory (`writes`), and its record is reviewed (lens `research-record
 Item tasks then cite the merged records: their implementer is confined to the providers (profile
 `closed`) and fetches nothing — a fact no record establishes stops preparation with
 "research needed: …".
+
+## A proposal before Gate1 (제안)
+
+Preparation runs after Gate1, so the thing Gate1 approves — the design, the exact scope — had no
+step of its own to be written in; a Foundation's proposal was written by hand (#63). A project may
+now have it drafted before the gate (`propose` in its policy):
+
+```yaml
+propose:
+  by: agent                     # devflow-proposer drafts it
+  required_for: [FOUNDATION]    # the pilot: every Foundation's gate1 binds a proposal
+  max_rounds: 3                 # drafting rounds, apart from implement.max_rounds
+  path: .devflow/proposals/{task}.md
+  instructions: .devflow/instructions/propose.md   # optional
+human_gates:
+  FOUNDATION:
+    - {id: gate1, phase: prepare, binds: proposal}
+```
+
+Any other task may ask for one (`proposal: true` in its block) where its change class has a
+prepare-phase gate that `binds: proposal`; nothing else changes for tasks that do not.
+
+| | what |
+|---|---|
+| who | `devflow-proposer` (principals.yaml): profile `closed`; may write only `/ws/<run>/proposal/proposal.md` and its report (anchored CEL rules — a `simple` `.contains()` is a substring test in Preloop and let `../` through) — not the checkout, so not the product, the rules, the task block or an approval. deliver also refuses any change to the checkout, and pushes exactly two files |
+| where | `devflow-proposal/<task id>`: the proposal and `<path stem>.proposal.json`, devflow's record of it (canonical base, inputs, scope_files, depends_on, decisions, research, round, run, the revision request it answers). Fast-forwarded only, never a pull request — every version a person was shown stays in the branch's history, and the state comment lists every commit pushed and why |
+| when | a gate binds a proposal and it is missing, stale, or a person asked for a revision — independent of `implement.by` and `implement: human`. A pass with nothing changed drafts nothing |
+| stale | any input changed: the task block (less `scope_files`, `pr`, `issue`, `transaction_commit`), the policy or hook, the pinned criteria and contracts, a file it depends on or proposes to change, the research answering its questions. Judged at canonical's head before the change lands, and at the commit it landed on afterwards — so landing does not make its own approval stale |
+| the gate | binds the proposal's commit and both blobs, its canonical base and current inputs, besides what it bound before (task, policy, workflow, hook, approval blobs). Approved by nothing while the proposal is not FRESH, while the task block's `scope_files` differ from the proposal's (a person copies them — the task stays the person's), or while it leaves a decision or research open |
+| revise | `/devflow revise proposal <proposal sha>` and what to change on the following lines; answered once |
+| limit | `propose.max_rounds`; past it, `/devflow approve propose <inputs digest>` grants one round **for exactly those inputs**: unused when the inputs change, it pays for nothing else. Rounds grants paid for stay counted (`history.proposal.grants_spent`); each comment is one grant |
+
+A hook that requires `scope_files` before anything else (the infra scanner's does, for a
+Foundation) receives `proposal_requested` with `classify`, so it can accept their absence until the
+proposal supplies them; the engine still holds the gate until the two are equal.
 
 ## devflow implements (준비 · 구현)
 
