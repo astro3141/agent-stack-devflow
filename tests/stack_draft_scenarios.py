@@ -232,6 +232,19 @@ def controls_draft(ct):
         g, c, rep, _, _ = run("KISA U-02", drafter(produce=False))
         ct.check("draft: a drafter that produced nothing gives INVALID", (c.get("verdict"), has(rep, "blocking", "produced no report")),
                  ("INVALID", True))
+        # a repeat in the same workspace: the earlier report is gone before the drafter runs again
+        rid = "ctl-" + secrets.token_hex(4)
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid}
+        ws2 = os.path.join(ct.WS_ROOT, rid)
+        sim.runs.append(ws2)
+        ct.step("draft_gather.py", ["scanner-fixture", "KISA U-02", sim.name], env)
+        drafter()(ws2)
+        ct.step("draft_gather.py", ["scanner-fixture", "KISA U-02", sim.name], env)
+        c = ct.step("draft_check.py", ["scanner-fixture", "True", "run-draft"], env)
+        rep = json.load(open(os.path.join(ws2, "devflow", "draft_report.json"), encoding="utf-8"))
+        ct.check("draft: a repeated gather clears the earlier report — an old draft is not this attempt's",
+                 (os.path.exists(os.path.join(ws2, "devflow", "draft.json")), c.get("verdict"), has(rep, "blocking", "produced no report")),
+                 (False, "INVALID", True))
         g, c, rep, _, _ = run("   ", drafter())
         ct.check("draft: an empty request is refused before anything is read", g.get("status"), "REFUSED")
 

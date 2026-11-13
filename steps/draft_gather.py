@@ -94,6 +94,13 @@ def main(argv):
     os.makedirs(D, exist_ok=True)
     shutil.rmtree(DRAFT, ignore_errors=True)
     os.makedirs(DRAFT)
+    # what an earlier attempt in this workspace left is not this attempt's draft (a resumed or
+    # repeated run would otherwise judge an old report when the drafter produces nothing)
+    for f in ("draft.json", "draft_report.json", "draft_context.json", "prompt_draft.md", "snapshot.json"):
+        try:
+            os.remove(os.path.join(D, f))
+        except FileNotFoundError:
+            pass
     try:
         reg = dfcore.registration(project)
         if reg["remote"] == "fixture":
