@@ -10,13 +10,14 @@
 # and under which quota. The project policy says what the work must satisfy. Neither decides the
 # other.
 name: devflow
-version: 0.2.0
+version: 0.3.0
 description: Development workflow — prepare, implement, review, judge and integrate a task on GitHub
 # The operator's and user's manual: setup, the waiting states and what each asks, the commands.
 runbook: RUNBOOK.md
 workflows:
   devflow: devflow.yaml            # one pass over a task: judge it, and act on it when devflow may
   devflow-auto: devflow-auto.yaml  # passes, one after another, until a person or CI has the next move
+  devflow-draft: devflow-draft.yaml  # a request → a checked draft of a task issue; reads only, posts nothing
 requires:
   # The hosts this package's scripts reach, declared so the allowlist can be read back (agent-stack
   # OPERATIONS §45). Declaring does not open them: the allowlist is the operator's file and it is

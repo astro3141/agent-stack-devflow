@@ -124,6 +124,43 @@ principals:
           condition_expression: ""
           rule_description: and nothing else
 
+  devflow-drafter:
+    # Drafts a task issue from a person's request (workflow devflow-draft). It reads the canonical
+    # checkout the run was given and writes exactly two files in its workspace: draft/issue.md and
+    # its report devflow/draft.json — never the checkout (/repo/), and nothing on GitHub: it has no
+    # GitHub tool, the steps around it hold the remote through a wrapper that refuses every write,
+    # and draft_check refuses a draft whose drafter changed the checkout. The providers and nothing
+    # else (closed), like the proposer: a fact the repository does not establish is an unknown, never
+    # fetched or guessed. The same anchored CEL as the proposer (Preloop 0.15.0 reads a simple
+    # `.contains()` as a substring test), and the same limit: a static rule cannot say which run.
+    egress_profile: closed
+    description: >
+      devflow's issue drafter. Reads the canonical checkout; writes only its draft
+      (/ws/<run>/draft/issue.md) and its own report (/ws/<run>/devflow/draft.json).
+    tool_rules:
+      write_file:
+        - action: allow
+          condition_type: cel
+          condition_expression: "has(args.path) && args.path.matches('^/ws/[A-Za-z0-9_-]+/draft/issue[.]md$')"
+          rule_description: the drafter writes its draft
+        - action: allow
+          condition_type: cel
+          condition_expression: "has(args.path) && args.path.matches('^/ws/[A-Za-z0-9_-]+/devflow/draft[.]json$')"
+          rule_description: and its report
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+      edit_file:
+        - action: allow
+          condition_type: cel
+          condition_expression: "has(args.path) && args.path.matches('^/ws/[A-Za-z0-9_-]+/draft/issue[.]md$')"
+          rule_description: the drafter revises its draft
+        - action: deny
+          condition_type: simple
+          condition_expression: ""
+          rule_description: and nothing else
+
   devflow-researcher:
     # The research lane's role (task types research and survey). Its profile's hosts are primary
     # sources for how an operating system packages a product: the distributions' package indexes and

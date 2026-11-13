@@ -23,6 +23,9 @@ Groups, by the risk each pins:
   proposal    (tests/stack_proposal_scenarios.py) a proposal is drafted before the gate that binds it;
               the gate approves its exact version, never a stale or mismatched one; the proposer
               writes nothing but the proposal
+  draft       (tests/stack_draft_scenarios.py) the issue draft generator reads only, finds existing
+              work without a model, and refuses a draft whose block, class, sources or claims do not
+              hold — and the remote is unchanged
 """
 import contextlib, copy, hashlib, io, json, os, secrets, shutil, subprocess, sys, tempfile
 
@@ -1925,6 +1928,7 @@ if __name__ == "__main__":
     sys.path.insert(0, os.path.join(PKG, "tests"))
     from stack_foundation_scenarios import controls_foundation_pr, controls_foundation_blobs
     from stack_proposal_scenarios import controls_proposal
+    from stack_draft_scenarios import controls_draft
     for group in (controls_flow, controls_block, controls_stale, controls_foundation, controls_evidence,
                   controls_shared, controls_effects, controls_rules, controls_tool, controls_implement,
                   controls_auth):
@@ -1932,6 +1936,7 @@ if __name__ == "__main__":
     controls_foundation_pr(sys.modules[__name__])
     controls_foundation_blobs(sys.modules[__name__])
     controls_proposal(sys.modules[__name__])
+    controls_draft(sys.modules[__name__])
     print("")
     print(f"{len(PASS_)}/{len(PASS_) + len(FAIL_)} controls")
     sys.exit(1 if FAIL_ else 0)

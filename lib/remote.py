@@ -139,6 +139,12 @@ class GitHubRemote:
         return {"number": i["number"], "state": i["state"], "body": i.get("body") or "",
                 "title": i.get("title") or "", "labels": [l["name"] for l in i.get("labels", [])]}
 
+    def issues(self):
+        """Every issue, open and closed (pull requests, which GitHub lists here too, left out)."""
+        return [{"number": i["number"], "state": i["state"], "body": i.get("body") or "",
+                 "title": i.get("title") or "", "labels": [l["name"] for l in i.get("labels", [])]}
+                for i in self._pages("/issues?state=all") if "pull_request" not in i]
+
     def changed_files(self, base, head):
         c = self._call("GET", f"/compare/{base}...{head}")
         # A rename has two paths, and a guard that sees only the new one lets a protected file
@@ -476,6 +482,12 @@ class FixtureRemote:
         return {"number": int(number), "state": i.get("state", "open"), "body": i.get("body", ""),
                 "title": i.get("title", ""), "labels": list(i.get("labels", []))}
 
+    def issues(self):
+        self._up()
+        return [{"number": int(n), "state": i.get("state", "open"), "body": i.get("body", ""),
+                 "title": i.get("title", ""), "labels": list(i.get("labels", []))}
+                for n, i in sorted(self.r["issues"].items(), key=lambda kv: int(kv[0]))]
+
     def changed_files(self, base, head):
         self._up()
         a, b = self._files(base), self._files(head)
@@ -727,6 +739,38 @@ class FixtureRemote:
         self._save()
         self._lose("push_commit")
         return new
+
+
+class ReadOnly:
+    """A remote that can only be read. The issue draft generator works through this: every method
+    that changes anything on the remote raises before it reaches the remote, and so does any name
+    not listed here — a method added to the remotes later is refused until someone lists it."""
+    READS = frozenset(("repo_info", "branch_head", "branch_head_or_none", "pull", "issue", "issues",
+                       "changed_files", "contains", "file_at", "list_dir", "blob_id", "check_runs",
+                       "reviews", "comments", "statuses", "ref", "commit", "materialize", "find_pull"))
+
+    def __init__(self, inner):
+        object.__setattr__(self, "_inner", inner)
+        object.__setattr__(self, "refused", [])
+
+    @property
+    def kind(self):
+        return self._inner.kind
+
+    @property
+    def repo(self):
+        return self._inner.repo
+
+    def __getattr__(self, name):
+        if name in self.READS:
+            return getattr(self._inner, name)
+        def refuse(*a, **kw):
+            self.refused.append(name)
+            raise RemoteError(f"read-only remote: {name} is not a read")
+        return refuse
+
+    def __setattr__(self, name, value):
+        raise AttributeError("read-only remote")
 
 
 def open_remote(kind, repo, fixture_path=None, proxy_env=None):
