@@ -1,0 +1,190 @@
+# devflow-draft: a person's request in their own words → a draft of a devflow task issue, grounded in
+# the canonical branch and the existing issues, checked by the project's real rules. Read only.
+#
+#   gather ─OK─▶ route ─ROUTE─▶ draft_agent ─▶ check ─▶ record ─▶ ended_*
+#     └──────────────┴─────────────────────────────────────▶ record
+#
+#   run_workflow.py start <id> devflow-draft long-task project=<p> "request=<what you want done>"
+#
+# gather reads through a remote that refuses every write (lib/remote.py ReadOnly): the canonical
+# head, the policy and hook there, the task template, the official criteria and contracts, every
+# issue with its task block, and the issues the request may duplicate, update or follow (found
+# without a model). One model call as devflow-drafter (closed: the providers only; writes only
+# draft/issue.md and its report) drafts it. check parses it with devflow's own parser, runs the
+# project hook's classify, and checks sources, classes, relations and claims. The result stays in
+# the run's workspace (/ws/<run>/draft/): nothing is posted, no issue is created or edited, nothing
+# is approved. A draft is not an issue, an approval or permission to run.
+workflow:
+  name: devflow-draft
+  description: Draft a devflow task issue from a request — grounded, checked, read only
+  entry_point: gather
+  input:
+    profile:
+      type: string
+      required: false
+      default: long-task
+      description: execution profile for the drafter (the model call)
+    project:
+      type: string
+      required: true
+      description: a project registered in config/devflow/projects/<project>.yaml
+    request:
+      type: string
+      required: true
+      description: what the person wants done, in their own words
+    fixture:
+      type: string
+      required: false
+      default: ""
+      description: fixture remote scenario (projects whose registration says remote fixture)
+  limits:
+    max_iterations: 10
+    timeout_seconds: 4800
+
+agents:
+  - name: gather
+    type: script
+    description: The canonical frame, the template, the criteria and every issue — through a read-only remote
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/draft_gather.py", "{{ workflow.input.project }}",
+           "{{ workflow.input.request }}", "{{ workflow.input.fixture }}"]
+    timeout: 600
+    output:
+      status: {type: string}
+      prompt: {type: string}
+      canonical: {type: string}
+      issues: {type: number}
+      candidates: {type: number}
+      error: {type: string}
+    routes:
+      - to: route
+        when: "{{ gather.output.status == 'OK' }}"
+      - to: record
+
+  - name: route
+    type: script
+    description: Quota admission for the drafter (a HOLD means no draft in this run)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/stack/steps/route.py", "{{ workflow.input.profile }}"]
+    output:
+      decision: {type: string}
+      provider: {type: string}
+      reason: {type: string}
+      evaluated: {type: string}
+      model_route: {type: string}
+      login: {type: string}
+      profile: {type: string}
+      evidence_dir: {type: string}
+    routes:
+      - to: draft_agent
+        when: "{{ route.output.decision == 'ROUTE' }}"
+      - to: record
+
+  - name: draft_agent
+    type: script
+    description: 초안 — the issue draft and its report, as devflow-drafter (reads canonical; writes two files)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/stack/steps/agent_task.py", "{{ route.output.provider }}",
+           "{{ route.output.model_route }}", "draft", "{{ gather.output.prompt }}",
+           "devflow/draft.json", "{{ route.output.profile }}", "{{ route.output.login }}",
+           "devflow-drafter"]
+    timeout: 3700
+    output:
+      status: {type: string}
+      closed: {type: boolean}
+      provider: {type: string}
+      principal: {type: string}
+      model_route: {type: string}
+      run_id: {type: string}
+      workspace: {type: string}
+      produced_path: {type: string}
+      produced: {type: boolean}
+      produced_stale: {type: boolean}
+      model_session_reported: {type: string}
+      model_adapter_reported: {type: string}
+      model_served: {type: string}
+      approvals_requested: {type: number}
+      mcp_rule_denials: {type: number}
+      retryable_elsewhere: {type: boolean}
+      evidence_dir: {type: string}
+      profile: {type: string}
+      attempts: {type: number}
+      failure: {type: string}
+      ledger_error: {type: string}
+      turns: {type: number}
+      tool_calls: {type: number}
+      server_tool_use: {type: number}
+      schema_sha256: {type: string}
+      answer: {type: object}
+      measurements:
+        type: object
+        properties:
+          total_tokens: {type: number, required: false}
+          wall_ms: {type: number, required: false}
+          model_usage: {type: array, required: false}
+    routes:
+      - to: check
+
+  - name: check
+    type: script
+    description: The draft by devflow's parser, the project's hook and the grounding rules — deterministic, no remote
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/draft_check.py", "{{ workflow.input.project }}",
+           "{{ draft_agent.output.produced }}", "{{ draft_agent.output.run_id }}"]
+    timeout: 300
+    output:
+      status: {type: string}
+      verdict: {type: string}
+      report: {type: string}
+      issue: {type: string}
+      blocking: {type: number}
+      open: {type: number}
+      summary: {type: string}
+      error: {type: string}
+    routes:
+      - to: record
+
+  - name: record
+    type: script
+    description: Record the run (never changes its outcome)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/stack/steps/record.py"]
+    stdin: "{{ {'executions': ([draft_agent.output] if draft_agent is defined else []), 'receipts': [], 'check': {'decision': (check.output.verdict if check is defined else ''), 'reason': (check.output.summary if check is defined else (route.output.reason if route is defined else gather.output.error)), 'file_sha256': ''}, 'evidence_file': '', 'measurements': {}, 'route': (route.output if route is defined else {'decision': 'NOT_NEEDED', 'reason': 'gather did not finish: ' ~ gather.output.error})} | tojson }}"
+    output:
+      mlflow_run_id: {type: string}
+      experiment_id: {type: string}
+      executions: {type: number}
+      children: {type: number}
+      record_error: {type: string}
+    routes:
+      - to: ended_failed
+        when: "{{ gather.output.status != 'OK' or (check is defined and check.output.status != 'OK') }}"
+      - to: ended_held
+        when: "{{ check is not defined }}"
+      - to: ended_drafted
+
+  - name: ended_drafted
+    type: terminate
+    status: success
+    reason: "{{ check.output.summary }} — read {{ check.output.report }} (nothing was posted)"
+
+  - name: ended_held
+    type: terminate
+    status: success
+    reason: "no draft in this run: {{ route.output.reason }}"
+
+  - name: ended_failed
+    type: terminate
+    status: failed
+    reason: "TOOL_FAILURE: {{ gather.output.error }}{% if check is defined %} {{ check.output.error }}{% endif %}"
+
+output:
+  project: "{{ workflow.input.project }}"
+  canonical: "{{ gather.output.canonical }}"
+  issues: "{{ gather.output.issues }}"
+  candidates: "{{ gather.output.candidates }}"
+  verdict: "{% if check is defined %}{{ check.output.verdict }}{% endif %}"
+  summary: "{% if check is defined %}{{ check.output.summary }}{% endif %}"
+  report: "{% if check is defined %}{{ check.output.report }}{% endif %}"
+  issue: "{% if check is defined %}{{ check.output.issue }}{% endif %}"
+  mlflow_run_id: "{{ record.output.mlflow_run_id }}"

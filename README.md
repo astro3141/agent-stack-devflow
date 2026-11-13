@@ -18,12 +18,13 @@ the commands, the limits, where to look. This page is the design.
 Nothing in this package names a project. The infra scanner's KISA / Item ID / Foundation rules are
 in `infra-scanner-io/.devflow/`, not here.
 
-## Two workflows
+## Three workflows
 
 | | |
 |---|---|
 | `devflow-auto` | what a person starts: passes over one task, one after another, until the next move is a person's (a decision, a gate, the merge), CI's (it waits for the checks on the head, then passes again) or nobody's (no progress). Start it again to resume |
 | `devflow` | one pass: judge the task from GitHub, and act on it when devflow may — prepare, implement, push, or hand over |
+| `devflow-draft` | before there is a task: a person's request → a checked draft of the task issue, in the run's workspace. Reads only; posts nothing (below) |
 
 ## What a pass does
 
@@ -127,6 +128,35 @@ prepare-phase gate that `binds: proposal`; nothing else changes for tasks that d
 A hook that requires `scope_files` before anything else (the infra scanner's does, for a
 Foundation) receives `proposal_requested` with `classify`, so it can accept their absence until the
 proposal supplies them; the engine still holds the gate until the two are equal.
+
+## Drafting the task issue (초안, devflow-draft)
+
+Before a task exists, a person describes the work in their own words; `devflow-draft` turns that
+into a draft of the issue — body and ` ```devflow ` block — grounded in the canonical branch and the
+existing issues, and checked by the project's real rules. **Read only**: it creates, edits and
+comments on no issue, approves nothing, opens no pull request and changes no code. A draft is not
+an issue, an approval or permission to run; a person reads it and posts it (or not).
+
+```
+gather ─▶ route ─▶ draft_agent (devflow-drafter) ─▶ check ─▶ record
+```
+
+| step | what |
+|---|---|
+| `draft_gather.py` | through `remote.ReadOnly` (every write, and every method not listed as a read, raises before it reaches the remote): the canonical head, the policy and hook there, the template (policy `draft.template`, default `.devflow/templates/task.md`), the pinned criteria and contracts, every issue with its block parsed by `parse_task`. Finds without a model the issues the request may duplicate, update or follow: a `#n` it names or a shared item/task code (`strong`), or overlapping words (`similar`); the bodies and comments of the strong ones go to the drafter (devflow's state comment as its sentences, without its JSON marker; a prompt over 190,000 characters is refused) |
+| `draft_agent` | one call as `devflow-drafter` (profile `closed`; may write only `/ws/<run>/draft/issue.md` and `/ws/<run>/devflow/draft.json`, anchored CEL like the proposer). Decides new / update / follow_up / duplicate first; reports facts with sources, inferences with what they rest on, unknowns as research / contract_gap / decision, and a class candidate with evidence — or `unresolved` |
+| `draft_check.py` | no remote at all: the block by `parse_task` and the policy's vocabulary, a task id already in use, the hook's `classify` with the drafter's scope candidates as the files (violations refuse; problems, decisions and gaps are open), a class only with evidence at the canonical commit, every fact's source openable (a path, `path:line` or an existing `#n`), every strong candidate addressed and no "new" for work an open issue covers, no claim of a verified or ready state in the prose (confirmed, approved, 확정됨, 준비 완료, ...), and a checkout the drafter left unchanged |
+
+The answer is `INVALID` (a check refused it), `NEEDS_INPUT` (a sound draft with open items for a
+person) or `DRAFTED` — never "ready". It stays in the run's workspace: `/ws/<run>/draft/issue.md`
+and `/ws/<run>/draft/report.md` (canonical SHA, related issues, sources, checks, what is open).
+
+```
+run_workflow.py start <id> devflow-draft long-task project=<p> "request=<what you want done>"
+```
+
+Not in it, on purpose: posting the issue, starting research, branching a Foundation, scheduling
+by dependency.
 
 ## devflow implements (준비 · 구현)
 
