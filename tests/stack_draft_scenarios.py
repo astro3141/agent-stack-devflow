@@ -275,6 +275,10 @@ def controls_draft(ct):
                  (g.get("status"), fctx.get("request") == korean, fctx.get("request_file")), ("OK", True, fname))
         strong = sorted(c.get("number") for c in fctx.get("candidates") or [] if c.get("strength") == "strong")
         ct.check("draft: a code or #n followed by a Korean particle (SRV-174를, #5번) still names it", strong, [5])
+        g, fctx = gather_file("", fname, "#5abc 와 #5_test, my_SRV-174 와 SRV-174_x 의 새 점검".encode("utf-8"))
+        strong = sorted(c.get("number") for c in fctx.get("candidates") or [] if c.get("strength") == "strong")
+        ct.check("draft: #n or a code inside another identifier (#5abc, #5_test, my_SRV-174, SRV-174_x) names nothing",
+                 (g.get("status"), strong), ("OK", []))
         g, _ = gather_file("KISA U-02", fname, b"KISA U-02")
         ct.check("draft: request and request_file together are refused", g.get("status"), "REFUSED")
         g, _ = gather_file("", "ctl-req-missing-" + secrets.token_hex(4) + ".md")
