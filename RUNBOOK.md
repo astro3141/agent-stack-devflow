@@ -31,7 +31,9 @@ of those sentences and what each one asks.
 0. Optional: draft it first. `run_workflow.py start <id> devflow-draft long-task project=<p>
    "request=<what you want done>"` reads canonical and every issue, and leaves a checked draft in
    `/ws/<id>/draft/issue.md` with `/ws/<id>/draft/report.md` (related issues, sources, what is
-   open). It posts nothing: you read it, fix it, and open the issue yourself.
+   open). It posts nothing: you read it, fix it, and open the issue yourself. A request in
+   Korean or longer than 200 characters goes in the hand-in directory as a file:
+   `request_file=<name>` instead of `request=`.
 1. Open an issue from the project's task template. The ` ```devflow ` block is what devflow reads:
    `id`, `type`, `goal`, `change_class`, `items`, and `implement: agent` (devflow does the work) or
    `implement: human` (a person opens the pull request and names it: `pr: <n>`).

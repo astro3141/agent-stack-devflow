@@ -5,6 +5,8 @@
 #     └──────────────┴─────────────────────────────────────▶ record
 #
 #   run_workflow.py start <id> devflow-draft long-task project=<p> "request=<what you want done>"
+#   run_workflow.py start <id> devflow-draft long-task project=<p> request_file=<name>
+#     (the request as a file in the hand-in directory, /work/handoff/<name>: any language, any length)
 #
 # gather reads through a remote that refuses every write (lib/remote.py ReadOnly): the canonical
 # head, the policy and hook there, the task template, the official criteria and contracts, every
@@ -30,8 +32,14 @@ workflow:
       description: a project registered in config/devflow/projects/<project>.yaml
     request:
       type: string
-      required: true
-      description: what the person wants done, in their own words
+      required: false
+      default: ""
+      description: what the person wants done, in their own words (the stack's input characters, up to 200)
+    request_file:
+      type: string
+      required: false
+      default: ""
+      description: the request as a hand-in by name (/work/handoff/<name>, UTF-8) — for any other language or length; exactly one of request and request_file
     fixture:
       type: string
       required: false
@@ -47,7 +55,8 @@ agents:
     description: The canonical frame, the template, the criteria and every issue — through a read-only remote
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/draft_gather.py", "{{ workflow.input.project }}",
-           "{{ workflow.input.request }}", "{{ workflow.input.fixture }}"]
+           "{{ workflow.input.request }}", "{{ workflow.input.fixture }}",
+           "{{ workflow.input.request_file }}"]
     timeout: 600
     output:
       status: {type: string}
