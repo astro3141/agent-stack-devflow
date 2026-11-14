@@ -28,7 +28,7 @@ class Claims(unittest.TestCase):
     def test_negated_is_not_a_claim(self):
         for text in ("후보 범위(승인된 범위 아님): `items/kisa/U-18.yaml`", "승인되지 않은 초안이다.",
                      "이 범위는 승인된 것이 아니다.", "승인된 것이 아닌 후보 목록", "확정된 사항은 없다.",
-                     "검증 완료되지 않음", "The scope is not approved.", "This has not been verified.",
+                     "검증 완료되지 않음", "이 문서는 초안이며, 승인된 범위가 아닙니다.", "확정된 것이 아닐 수 있다.", "The scope is not approved.", "This has not been verified.",
                      "Nothing here is confirmed.", "never approved", "It isn't confirmed.", "not ready to implement"):
             self.assertEqual(claimed(text), [], text)
 

@@ -299,7 +299,7 @@ def controls_draft(ct):
 
         # --- a negated claim word says what is not so; each occurrence is read on its own
         for line in ("후보 범위(승인된 범위 아님): 아래 파일.", "승인되지 않은 초안이다.", "이 범위는 승인된 것이 아니다.",
-                     "검증 완료되지 않음.", "The scope is not approved.", "This has not been verified."):
+                     "검증 완료되지 않음.", "이 문서는 초안이며, 승인된 범위가 아닙니다.", "The scope is not approved.", "This has not been verified."):
             g, c, rep, _, _ = run("KISA U-02", drafter(prose=f"## 해결할 문제\n{line}\n\n"))
             ct.check(f"draft: the negated {line!r} is not a claim", (c.get("verdict"), rep.get("blocking")), ("DRAFTED", []))
         for line in ("후보 범위(승인된 범위 아님), 그러나 D-1은 승인됨.", "Not approved, but verified by CI.",

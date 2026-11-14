@@ -36,7 +36,8 @@ CLAIM = re.compile(r"(?i)\b(confirmed|verified|ready to (?:implement|merge|start
 # clause — punctuation and a clause-joining ending or conjunction end the clause.
 CLAUSE_END = re.compile(r"[,.;:!?()\[\]，。、·—–]|\s(?:but|however|although|though|whereas|while|and|so)\b"
                         r"|\s(?:그러나|하지만|그런데|그리고|다만)(?=\s|$)", re.I)
-KO_NEG = re.compile(r"아니|아닌|아님|않|없|못|^안$|^전(?:이|에|$)")
+# 아니·아닌·아님·아닙(니다)·아닐·아냐: every form of 아니다 — Hangul syllables differ by their final consonant
+KO_NEG = re.compile(r"아[니닌님닙닐냐]|않|없|못|^안$|^전(?:이|에|$)")
 KO_JOIN = re.compile(r"(?:며|고|지만|는데|으나|면서|어서|아서)$")
 EN_NEG = re.compile(r"^(?:not|never|no|nothing|none|neither|nor|without|cannot|yet-to-be)$|n't$", re.I)
 
