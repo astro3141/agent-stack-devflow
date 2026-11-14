@@ -33,7 +33,9 @@ of those sentences and what each one asks.
    `/ws/<id>/draft/issue.md` with `/ws/<id>/draft/report.md` (related issues, sources, what is
    open). It posts nothing: you read it, fix it, and open the issue yourself. A request in
    Korean or longer than 200 characters goes in the hand-in directory as a file:
-   `request_file=<name>` instead of `request=`.
+   `request_file=<name>` instead of `request=`. With `draft_publish: gist` in the project's
+   registration the run also leaves the draft in a secret gist and names its link (the GitHub App
+   devflow signs in through needs the account permission *Gists: Read and write*).
 1. Open an issue from the project's task template. The ` ```devflow ` block is what devflow reads:
    `id`, `type`, `goal`, `change_class`, `items`, and `implement: agent` (devflow does the work) or
    `implement: human` (a person opens the pull request and names it: `pr: <n>`).

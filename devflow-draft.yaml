@@ -1,7 +1,7 @@
 # devflow-draft: a person's request in their own words → a draft of a devflow task issue, grounded in
 # the canonical branch and the existing issues, checked by the project's real rules. Read only.
 #
-#   gather ─OK─▶ route ─ROUTE─▶ draft_agent ─▶ check ─▶ record ─▶ ended_*
+#   gather ─OK─▶ route ─ROUTE─▶ draft_agent ─▶ check ─▶ publish ─▶ record ─▶ ended_*
 #     └──────────────┴─────────────────────────────────────▶ record
 #
 #   run_workflow.py start <id> devflow-draft long-task project=<p> "request=<what you want done>"
@@ -16,6 +16,10 @@
 # project hook's classify, and checks sources, classes, relations and claims. The result stays in
 # the run's workspace (/ws/<run>/draft/): nothing is posted, no issue is created or edited, nothing
 # is approved. A draft is not an issue, an approval or permission to run.
+#
+# publish is the one write, and only when the project's registration says `draft_publish: gist`:
+# a secret gist of the token's account with draft/issue.md and draft/report.md, for reading on
+# GitHub. Not an issue, nothing in the repository; it never changes the draft's outcome.
 workflow:
   name: devflow-draft
   description: Draft a devflow task issue from a request — grounded, checked, read only
@@ -151,6 +155,22 @@ agents:
       summary: {type: string}
       error: {type: string}
     routes:
+      - to: publish
+
+  - name: publish
+    type: script
+    description: A secret gist of the checked draft, for reading on GitHub — only if the registration asks (draft_publish gist)
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/draft_publish.py", "{{ workflow.input.project }}",
+           "{{ check.output.verdict }}"]
+    timeout: 120
+    output:
+      status: {type: string}
+      url: {type: string}
+      gist: {type: string}
+      error: {type: string}
+      hint: {type: string}
+    routes:
       - to: record
 
   - name: record
@@ -175,7 +195,7 @@ agents:
   - name: ended_drafted
     type: terminate
     status: success
-    reason: "{{ check.output.summary }} — read {{ check.output.report }} (nothing was posted)"
+    reason: "{{ check.output.summary }} — read {{ check.output.report }}{% if publish is defined and publish.output.status == 'OK' %} · secret gist {{ publish.output.url }} (no issue was posted){% elif publish is defined and publish.output.status != 'SKIPPED' %} · gist not made: {{ publish.output.error }} {{ publish.output.hint }}{% else %} (nothing was posted){% endif %}"
 
   - name: ended_held
     type: terminate
@@ -196,4 +216,6 @@ output:
   summary: "{% if check is defined %}{{ check.output.summary }}{% endif %}"
   report: "{% if check is defined %}{{ check.output.report }}{% endif %}"
   issue: "{% if check is defined %}{{ check.output.issue }}{% endif %}"
+  publish: "{% if publish is defined %}{{ publish.output.status }}{% endif %}"
+  gist: "{% if publish is defined %}{{ publish.output.url }}{% endif %}"
   mlflow_run_id: "{{ record.output.mlflow_run_id }}"

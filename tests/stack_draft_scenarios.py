@@ -308,13 +308,104 @@ def controls_draft(ct):
         for name, args in (("add_comment", (3, "x")), ("edit_comment", (1, "x")), ("set_labels", (3, ["x"])),
                            ("create_pull", ("a", "b", "t", "b")), ("push_commit", ("b", "p", {}, "m", "a")),
                            ("merge", (7, "s", "merge")), ("create_ref", ("r", "s")), ("set_status", ("s", "c", "success", "d")),
-                           ("some_future_write", ())):
+                           ("create_gist", ("d", {"a.md": "x"})), ("some_future_write", ())):
             try:
                 getattr(ro, name)(*args)
                 got.append((name, "ran"))
             except remote_mod.RemoteError:
                 got.append((name, "refused"))
         ct.check("draft: the read-only remote refuses every write, and any unlisted name", {s for _, s in got}, {"refused"})
-        ct.check("draft: … and records what was refused", len(ro.refused), 9)
+        ct.check("draft: … and records what was refused", len(ro.refused), 10)
         ct.check("draft: … while reads pass through", (len(ro.issues()), ro.issue(5)["title"]), (3, "SRV-174 Foundation"))
         ct.check("draft: … and the remote's file did not change", hashlib.sha256(open(p, "rb").read()).hexdigest() == h0, True)
+
+    controls_draft_publish(ct)
+
+
+def controls_draft_publish(ct):
+    """publish: a secret gist of a checked draft, only when the registration asks for one."""
+    print("\n[draft] publish — a secret gist of the checked draft, only when the registration asks")
+    import secrets
+    sim = ct.Sim(draft_db(ct))
+    reg_dir = os.path.join(ct.stack_step.runtime()["paths"]["config_root"], "devflow", "projects")
+    base = open(os.path.join(reg_dir, "scanner-fixture.yaml"), encoding="utf-8").read()
+    regs = []
+
+    def registration(mode):
+        name = "ctl-pub-" + secrets.token_hex(4)
+        path = os.path.join(reg_dir, f"{name}.yaml")
+        body = base.replace("name: scanner-fixture", f"name: {name}")
+        open(path, "w", encoding="utf-8").write(body.rstrip("\n") + "\n" + f"draft_publish: {mode}\n")
+        regs.append(path)
+        return name
+
+    def drafted():
+        rid = "ctl-" + secrets.token_hex(4)
+        env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid, "AGENTSTACK_RUN_ID": "ctl-run-" + rid[4:]}
+        ws = os.path.join(ct.WS_ROOT, rid)
+        sim.runs.append(ws)
+        ct.step("draft_gather.py", ["scanner-fixture", "KISA U-02 비밀번호 복잡성 점검을 추가해줘", sim.name], env)
+        drafter()(ws)
+        c = ct.step("draft_check.py", ["scanner-fixture", "True", "run-draft"], env)
+        return env, ws, c
+
+    def gists():
+        return sim.db.get("gists") or []
+
+    try:
+        env, ws, c = drafted()
+        verdict = c.get("verdict")
+        ct.check("draft publish: the draft to publish was checked", verdict in ("DRAFTED", "NEEDS_INPUT"), True)
+
+        p = ct.step("draft_publish.py", ["scanner-fixture", verdict], env)
+        ct.check("draft publish: a registration that does not ask publishes nothing", (p.get("status"), len(gists())), ("SKIPPED", 0))
+        off = registration("none")
+        p = ct.step("draft_publish.py", [off, verdict], env)
+        ct.check("draft publish: draft_publish none publishes nothing", (p.get("status"), len(gists())), ("SKIPPED", 0))
+        bad = registration("public")
+        p = ct.step("draft_publish.py", [bad, verdict], env)
+        ct.check("draft publish: any mode but gist or none is refused — there is no public gist",
+                 (p.get("status"), len(gists())), ("FAILED", 0))
+
+        on = registration("gist")
+        p = ct.step("draft_publish.py", [on, ""], env)
+        ct.check("draft publish: no verdict (check did not run) publishes nothing", (p.get("status"), len(gists())), ("SKIPPED", 0))
+        p = ct.step("draft_publish.py", [on, verdict], env)
+        g = gists()
+        ct.check("draft publish: on, one secret gist with the issue and the report",
+                 (p.get("status"), len(g), bool(g) and g[0]["public"], sorted(g[0]["files"]) if g else []),
+                 ("OK", 1, False, ["1-issue.md", "2-report.md"]))
+        ct.check("draft publish: … carrying the files as the run left them",
+                 bool(g) and g[0]["files"]["1-issue.md"] == open(os.path.join(ws, "draft", "issue.md"), encoding="utf-8").read()
+                 and g[0]["files"]["2-report.md"] == open(os.path.join(ws, "draft", "report.md"), encoding="utf-8").read(), True)
+        ct.check("draft publish: … named by the run, the project, the canonical and the verdict",
+                 bool(g) and all(x in g[0]["description"] for x in (env["AGENTSTACK_RUN_ID"], on, verdict, "not an issue")), True)
+        rec = json.load(open(os.path.join(ws, "devflow", "draft_publish.json"), encoding="utf-8"))
+        ct.check("draft publish: the link is kept in the run's workspace", (rec.get("url") == p.get("url"), rec.get("secret")), (True, True))
+        again = ct.step("draft_publish.py", [on, verdict], env)
+        ct.check("draft publish: the same draft again is not published twice", (again.get("url") == p.get("url"), len(gists())), (True, 1))
+        rep_before = open(os.path.join(ws, "devflow", "draft_report.json"), encoding="utf-8").read()
+
+        env2, ws2, c2 = drafted()
+        sim.edit(lambda db: db.setdefault("faults", {}).update({"gists_denied": True}))
+        p = ct.step("draft_publish.py", [on, c2.get("verdict")], env2)
+        ct.check("draft publish: a token that may not make gists: FAILED, and what to grant",
+                 (p.get("status"), "Gists" in p.get("hint", ""), len(gists())), ("FAILED", True, 1))
+        sim.edit(lambda db: db["faults"].pop("gists_denied"))
+        sim.edit(lambda db: db.setdefault("faults", {}).update({"lose_response": ["create_gist"]}))
+        p = ct.step("draft_publish.py", [on, c2.get("verdict")], env2)
+        ct.check("draft publish: a lost answer is FAILED and says the gist may exist — no retry",
+                 (p.get("status"), "may have been made" in p.get("hint", ""), len(gists())), ("FAILED", True, 2))
+        ct.check("draft publish: publishing changes nothing the check decided",
+                 open(os.path.join(ws, "devflow", "draft_report.json"), encoding="utf-8").read() == rep_before, True)
+        fresh = draft_db(ct)
+        ct.check("draft publish: nothing but gists was written to the remote",
+                 {k: v for k, v in sim.db.items() if k not in ("gists", "faults")} ==
+                 {k: v for k, v in fresh.items() if k not in ("gists", "faults")}, True)
+    finally:
+        for r in regs:
+            try:
+                os.remove(r)
+            except OSError:
+                pass
+        sim.close()
