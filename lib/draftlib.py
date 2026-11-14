@@ -13,8 +13,11 @@ TEMPLATE_DEFAULT = ".devflow/templates/task.md"
 RELATIONS = ("new", "update", "follow_up", "duplicate")
 UNKNOWN_KINDS = ("research", "contract_gap", "decision")
 # an identifier-like code: an item (U-37, SRV-174), a task id (T-0054, T-F-SVCRUN)
-CODE = re.compile(r"\b[A-Z][A-Z0-9]{0,7}(?:-[A-Z0-9]{1,10})+\b")
-ISSUE_REF = re.compile(r"(?<![\w/])#(\d{1,6})\b")
+# bounded by ASCII letters, digits and underscore on both sides, not by \b: a Korean particle is a
+# word character, and "U-17을" or "#21번" must still name U-17 and #21 — while "#21abc", "#21_x",
+# "_U-17" or "U-17_x" are part of some other identifier and name nothing
+CODE = re.compile(r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9]{0,7}(?:-[A-Z0-9]{1,10})+(?![A-Za-z0-9_])")
+ISSUE_REF = re.compile(r"(?<![A-Za-z0-9_/])#(\d{1,6})(?![A-Za-z0-9_])")
 WORD = re.compile(r"[0-9A-Za-z가-힣_]{2,}")
 # words that claim a state only a verification or a person can give (requirement: no "confirmed" or
 # "ready" without it). Matched in the draft's prose, outside code fences.

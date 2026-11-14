@@ -248,6 +248,48 @@ def controls_draft(ct):
         g, c, rep, _, _ = run("   ", drafter())
         ct.check("draft: an empty request is refused before anything is read", g.get("status"), "REFUSED")
 
+        # --- the request as a hand-in file: what the stack's inputs cannot carry (any language, any length)
+        def gather_file(request, name, content=None):
+            rid = "ctl-" + secrets.token_hex(4)
+            env = {**os.environ, "CONDUCTOR_SELF_RUN_ID": rid}
+            ws = os.path.join(ct.WS_ROOT, rid)
+            sim.runs.append(ws)
+            path = os.path.join(ct.HANDOFF_ROOT, name) if content is not None else None
+            if path:
+                open(path, "wb").write(content)
+            try:
+                g = ct.step("draft_gather.py", ["scanner-fixture", request, sim.name, name], env)
+            finally:
+                if path and os.path.exists(path):
+                    os.remove(path)
+            try:
+                ctx = json.load(open(os.path.join(ws, "devflow", "draft_context.json"), encoding="utf-8"))
+            except Exception:
+                ctx = {}
+            return g, ctx
+
+        fname = "ctl-req-" + secrets.token_hex(4) + ".md"
+        korean = "SRV-174를 다루는 #5번 이슈와 겹치는지 보고, KISA U-02 점검을 기존 프리미티브로 구현하는 작업 이슈를 만들어 주세요.\n범위: \"/etc/passwd\" 확인 (200자를 넘어도 됩니다) " + "가" * 300
+        g, fctx = gather_file("", fname, ("\ufeff" + korean + "\n").encode("utf-8"))
+        ct.check("draft: a request handed in as a file (Korean, punctuation, over 200) is read as written",
+                 (g.get("status"), fctx.get("request") == korean, fctx.get("request_file")), ("OK", True, fname))
+        strong = sorted(c.get("number") for c in fctx.get("candidates") or [] if c.get("strength") == "strong")
+        ct.check("draft: a code or #n followed by a Korean particle (SRV-174를, #5번) still names it", strong, [5])
+        g, fctx = gather_file("", fname, "#5abc 와 #5_test, my_SRV-174 와 SRV-174_x 의 새 점검".encode("utf-8"))
+        strong = sorted(c.get("number") for c in fctx.get("candidates") or [] if c.get("strength") == "strong")
+        ct.check("draft: #n or a code inside another identifier (#5abc, #5_test, my_SRV-174, SRV-174_x) names nothing",
+                 (g.get("status"), strong), ("OK", []))
+        g, _ = gather_file("KISA U-02", fname, b"KISA U-02")
+        ct.check("draft: request and request_file together are refused", g.get("status"), "REFUSED")
+        g, _ = gather_file("", "ctl-req-missing-" + secrets.token_hex(4) + ".md")
+        ct.check("draft: a request_file that is not in the hand-in directory is refused", g.get("status"), "REFUSED")
+        g, _ = gather_file("", "..")
+        ct.check("draft: a request_file that escapes the hand-in directory is refused", g.get("status"), "REFUSED")
+        g, _ = gather_file("", fname, b"\xff\xfe\x00bad")
+        ct.check("draft: a request_file that is not UTF-8 is refused", g.get("status"), "REFUSED")
+        g, _ = gather_file("", fname, "   \n".encode("utf-8"))
+        ct.check("draft: an empty request_file is refused", g.get("status"), "REFUSED")
+
         ct.check("draft: gather asked the remote for no write in any scenario", ctx.get("remote_refused"), [])
         ct.check("draft: the fixture remote is byte-for-byte unchanged after every scenario", digest() == before, True)
     finally:

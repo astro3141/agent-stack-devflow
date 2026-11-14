@@ -1,10 +1,13 @@
 """devflow step: gather what an issue draft must be grounded in — read only.
 
-usage: draft_gather.py <project> <request> [<fixture>]
+usage: draft_gather.py <project> <request> [<fixture>] [<request file>]
 
-  project   a registration under config/devflow/projects/<project>.yaml
-  request   the person's request, in their own words
-  fixture   fixture remote scenario name (only for a project whose remote is `fixture`)
+  project       a registration under config/devflow/projects/<project>.yaml
+  request       the person's request, in their own words ("" when it comes as a file)
+  fixture       fixture remote scenario name (only for a project whose remote is `fixture`)
+  request file  the request as a hand-in by name (step.handoff: /work/handoff/<name>), UTF-8 —
+                for a request the stack's inputs cannot carry (any language, any punctuation,
+                longer than 200). Exactly one of request and request file.
 
 Reads, through a remote that refuses every write (lib/remote.py ReadOnly):
   * the canonical branch's head, the project policy and its hook at that commit
@@ -80,13 +83,43 @@ def fill(tpl, values):
     return tpl
 
 
+def read_request_file(name):
+    """The request handed in as a file, by name: (text, error)."""
+    if not SAFE.fullmatch(name):
+        return None, f"request_file {name!r} is not a plain name (letters, digits, . _ -)"
+    try:
+        path = step.handoff(name)
+    except ValueError as e:
+        return None, str(e)
+    if not os.path.isfile(path):
+        return None, f"no hand-in named {name!r}: put the request in the hand-in directory (/work/handoff/)"
+    with open(path, "rb") as f:
+        raw = f.read(REQUEST_MAX * 4 + 1)
+    if len(raw) > REQUEST_MAX * 4:
+        return None, f"the hand-in {name!r} is over {REQUEST_MAX} characters"
+    try:
+        return raw.decode("utf-8").lstrip("\ufeff"), ""
+    except UnicodeDecodeError:
+        return None, f"the hand-in {name!r} is not UTF-8 text"
+
+
 def main(argv):
     if len(argv) < 2:
-        emit(status="TOOL_FAILURE", error="usage: draft_gather.py <project> <request> [<fixture>]")
+        emit(status="TOOL_FAILURE", error="usage: draft_gather.py <project> <request> [<fixture>] [<request file>]")
         return 0
     project, request, fixture = argv[0], argv[1].strip(), (argv[2] if len(argv) > 2 else "")
+    request_file = (argv[3] if len(argv) > 3 else "").strip()
+    if request_file:
+        if request:
+            emit(status="REFUSED", error="both request and request_file were given: pass one")
+            return 0
+        text, err = read_request_file(request_file)
+        if err:
+            emit(status="REFUSED", error=err)
+            return 0
+        request = text.strip()
     if not request:
-        emit(status="REFUSED", error="the request is empty: say what you want done")
+        emit(status="REFUSED", error="the request is empty: say what you want done (request=, or request_file= for a hand-in)")
         return 0
     if len(request) > REQUEST_MAX:
         emit(status="REFUSED", error=f"the request is over {REQUEST_MAX} characters")
@@ -135,6 +168,7 @@ def main(argv):
     pol_doc = {k: v for k, v in pol.items() if not str(k).startswith("_")}
     ctx = {"schema": draftlib.DRAFT_SCHEMA, "run": RUN, "at": time.time(),
            "request": request, "request_digest": dfcore.sha256(request)[:16],
+           "request_file": request_file,
            "project": project, "repository": reg["repository"], "canonical_branch": reg["canonical_branch"],
            "canonical": canonical, "policy": {"path": reg["policy_path"], "digest": pol["_digest"]},
            "workflow": dfcore.workflow_identity(), "hook": hook_digests,

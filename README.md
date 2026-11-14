@@ -155,6 +155,15 @@ and `/ws/<run>/draft/report.md` (canonical SHA, related issues, sources, checks,
 run_workflow.py start <id> devflow-draft long-task project=<p> "request=<what you want done>"
 ```
 
+A run input carries only letters, digits, `.`, `_`, `-` and space, up to 200 (the stack's rule), so
+a request in Korean, with punctuation or longer than that comes as a file in the hand-in directory,
+by name — UTF-8, up to 20,000 characters; exactly one of `request` and `request_file`:
+
+```
+cp request.md <agent-stack>/handoff/u17-request.md
+run_workflow.py start <id> devflow-draft long-task project=<p> request_file=u17-request.md
+```
+
 Not in it, on purpose: posting the issue, starting research, branching a Foundation, scheduling
 by dependency.
 
