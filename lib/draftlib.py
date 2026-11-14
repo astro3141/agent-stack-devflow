@@ -8,7 +8,16 @@ import re
 import dfcore
 
 DRAFTER = "devflow-drafter"
-DRAFT_SCHEMA = "devflow/draft@1"
+# @2: the drafter's report separates reference_files (read, cited, never changed) from
+# scope_candidates (what the work would change — the only files the project's hook classifies), and
+# the issue body states the same scope between SCOPE_OPEN and SCOPE_CLOSE.
+# What carries over from @1, and what does not: a @1 *report* (draft.json without reference_files)
+# still reads, with no references. A @1 *issue body* has no scope section, and @2 refuses a task
+# draft without one — a draft is checked in the run that made it, so an old draft is drafted again,
+# never re-checked under the new contract.
+DRAFT_SCHEMA = "devflow/draft@2"
+SCOPE_OPEN = "<!-- devflow:scope -->"
+SCOPE_CLOSE = "<!-- /devflow:scope -->"
 TEMPLATE_DEFAULT = ".devflow/templates/task.md"
 RELATIONS = ("new", "update", "follow_up", "duplicate")
 UNKNOWN_KINDS = ("research", "contract_gap", "decision")
@@ -22,7 +31,43 @@ WORD = re.compile(r"[0-9A-Za-z가-힣_]{2,}")
 # words that claim a state only a verification or a person can give (requirement: no "confirmed" or
 # "ready" without it). Matched in the draft's prose, outside code fences.
 CLAIM = re.compile(r"(?i)\b(confirmed|verified|ready to (?:implement|merge|start)|approved)\b"
-                   r"|확정(?:됨|되었|했|된)|검증(?:됨|되었|완료)|준비\s*완료|승인(?:됨|되었|된)")
+                   r"|확정(?:됨|되었|했|된)|검증(?:됨|되었|\s*완료)|준비\s*완료|승인(?:됨|되었|된)")
+# A claim word is excused only by a negation of *that word*, in a fixed shape — never by a negation
+# that is merely near it ("승인된 작업은 문제가 없음" and "will not change the approved scope" negate
+# something else, and stay claims). What the shapes do not cover stays a claim, for a person to read.
+#   Korean, after the word:  승인되지 않은 / 검증 완료되지 않음        (its own negative form)
+#                            승인된 범위 아님 / 승인된 것이 아닙니다 / 확정된 사항은 없다
+#                            (at most one noun, then a word that *starts* with 아니·아닌·아님·아닙·아닐·없)
+#   English, right before it: not / never / n't [yet | been | be | formally | fully]* <word>
+#                            nothing / none / no <noun> [<word>] is|are|was|were|has been|have been <word>
+# Each occurrence is read on its own: one negated mention never excuses another in the same line.
+KO_NEG_WORD = re.compile(r"^(?:아니|아닌|아님|아닙|아닐|없)")
+KO_SELF_NEG = re.compile(r"^(?:되)?지$")
+KO_JOIN = re.compile(r"(?:며|고|지만|는데|으나|면서|어서|아서|해도|하여|하고|로|으로)$")
+EN_NEG_BEFORE = re.compile(r"(?:\b(?:not|never)|n't)(?:\s+(?:yet|been|be|formally|fully))*\s+$", re.I)
+EN_NONE_BEFORE = re.compile(r"\b(?:nothing|none|no\s+\w+)(?:\s+\w+)?\s+(?:is|are|was|were|has\s+been|have\s+been)\s+$", re.I)
+CLAUSE_END = re.compile(r"[,.;:!?()\[\]，。、·—–]")
+
+
+def _negated(line, m):
+    if re.search(r"[가-힣]", m.group(0)):
+        rest = CLAUSE_END.split(line[m.end():], maxsplit=1)[0]
+        words = rest.split()
+        if rest[:1] and not rest[:1].isspace():
+            tail = words.pop(0)     # the rest of the word itself: 승인된|, 검증 완료|되지
+            if KO_SELF_NEG.match(tail):
+                return bool(words) and words[0].startswith("않")
+            if KO_NEG_WORD.match(tail):
+                return False        # 승인됨아님 — not a shape a person writes; read it
+            if not re.fullmatch(r"(?:이|가|은|는|을|를|도|만)", tail):
+                return False        # 확정되었|다, 승인됨|이며 … — the word goes on to say something else
+        if words and KO_NEG_WORD.match(words[0]):
+            return True
+        return len(words) > 1 and not KO_JOIN.search(words[0]) and bool(KO_NEG_WORD.match(words[1]))
+    before = CLAUSE_END.split(line[:m.start()])[-1]
+    return bool(EN_NEG_BEFORE.search(before) or EN_NONE_BEFORE.search(before))
+
+
 FENCE = re.compile(r"```.*?```", re.S)
 INLINE = re.compile(r"`[^`\n]+`")
 
@@ -141,10 +186,39 @@ def claims(text):
     """Lines of prose that claim a verified or ready state."""
     out = []
     for n, line in enumerate(prose(text).splitlines(), 1):
-        m = CLAIM.search(line)
-        if m:
-            out.append({"line": line.strip()[:200], "word": m.group(0)})
+        for m in CLAIM.finditer(line):
+            if not _negated(line, m):
+                out.append({"line": line.strip()[:200], "word": m.group(0)})
+                break
     return out
+
+
+SCOPE_ITEM = re.compile(r"^\s*[-*+]\s+`([^`\n]+)`")
+SCOPE_MARK = re.compile(re.escape(SCOPE_OPEN) + "|" + re.escape(SCOPE_CLOSE))
+
+
+def scope_sections(text):
+    """The change scope the issue body states: (sections, problems). Each section is the list of
+    paths between SCOPE_OPEN and its SCOPE_CLOSE, one per list line, the path its first inline code
+    ("- `items/kisa/U-18.yaml` — why"). problems names every marker out of place: an open without its
+    close, a close without its open, an open inside an open. A section counts only when closed."""
+    sections, problems, start = [], [], None
+    text = text or ""
+    for m in SCOPE_MARK.finditer(text):
+        if m.group(0) == SCOPE_OPEN:
+            if start is not None:
+                problems.append(f"{SCOPE_OPEN} again before {SCOPE_CLOSE}")
+            start = m.end()
+        else:
+            if start is None:
+                problems.append(f"{SCOPE_CLOSE} without {SCOPE_OPEN} before it")
+                continue
+            body = text[start:m.start()]
+            sections.append([x.group(1).strip() for x in map(SCOPE_ITEM.match, body.splitlines()) if x])
+            start = None
+    if start is not None:
+        problems.append(f"{SCOPE_OPEN} is never closed by {SCOPE_CLOSE}")
+    return sections, problems
 
 
 # what must not leave in a gist. Deterministic and deliberately broad: a refused publish costs a
