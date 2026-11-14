@@ -136,7 +136,8 @@ into a draft of the issue — body and ` ```devflow ` block — grounded in the 
 existing issues, and checked by the project's real rules. **Read only**: it creates, edits and
 comments on no issue, approves nothing, opens no pull request and changes no code. A draft is not
 an issue, an approval or permission to run; a person reads it and posts it (or not). The one
-write, if the project's registration asks for it, is a secret gist of the draft (`publish`, below).
+write is a secret gist of the draft, made only when the run asks and the project allows it
+(`publish`, below).
 
 ```
 gather ─▶ route ─▶ draft_agent (devflow-drafter) ─▶ check ─▶ publish ─▶ record
@@ -147,13 +148,15 @@ gather ─▶ route ─▶ draft_agent (devflow-drafter) ─▶ check ─▶ pub
 | `draft_gather.py` | through `remote.ReadOnly` (every write, and every method not listed as a read, raises before it reaches the remote): the canonical head, the policy and hook there, the template (policy `draft.template`, default `.devflow/templates/task.md`), the pinned criteria and contracts, every issue with its block parsed by `parse_task`. Finds without a model the issues the request may duplicate, update or follow: a `#n` it names or a shared item/task code (`strong`), or overlapping words (`similar`); the bodies and comments of the strong ones go to the drafter (devflow's state comment as its sentences, without its JSON marker; a prompt over 190,000 characters is refused) |
 | `draft_agent` | one call as `devflow-drafter` (profile `closed`; may write only `/ws/<run>/draft/issue.md` and `/ws/<run>/devflow/draft.json`, anchored CEL like the proposer). Decides new / update / follow_up / duplicate first; reports facts with sources, inferences with what they rest on, unknowns as research / contract_gap / decision, and a class candidate with evidence — or `unresolved` |
 | `draft_check.py` | no remote at all: the block by `parse_task` and the policy's vocabulary, a task id already in use, the hook's `classify` with the drafter's scope candidates as the files (violations refuse; problems, decisions and gaps are open), a class only with evidence at the canonical commit, every fact's source openable (a path, `path:line` or an existing `#n`), every strong candidate addressed and no "new" for work an open issue covers, no claim of a verified or ready state in the prose (confirmed, approved, 확정됨, 준비 완료, ...), and a checkout the drafter left unchanged |
-| `draft_publish.py` | only when the registration (`config/devflow/projects/<p>.yaml`, the instance's file — not the canonical policy) says `draft_publish: gist`: one **secret** gist of the token's account with `1-issue.md` and `2-report.md`, described by the run, the project, the canonical SHA and the verdict. Never public (there is no way to ask for one), never an issue, nothing in the repository; it never changes the verdict. The link is kept in `/ws/<run>/devflow/draft_publish.json` and the same draft is not published twice. A token that may not make gists is FAILED with what to grant — the GitHub App devflow signs in through needs the account permission *Gists: Read and write*; a lost answer is FAILED and says the gist may exist, without a retry |
+| `draft_publish.py` | two keys, both required: the run asks (`publish=gist` when it is started — nothing by default, and a project's setting alone never publishes) and the project allows (`draft_publish: gist` in its registration, `config/devflow/projects/<p>.yaml`, the instance's file — not the canonical policy; without it a request is REFUSED). Then the files are scanned before anything leaves — tokens, API and cloud keys, private keys, JWTs, credential assignments, URLs with credentials, private-network addresses — and a finding REFUSES the publish, naming file, line and kind, never the value. Otherwise one **secret** gist of the token's account with `1-issue.md` and `2-report.md`, described by the run, the project, the canonical SHA and the verdict. Never public (there is no way to ask for one), never an issue, nothing in the repository; it never changes the verdict. The link is kept in `/ws/<run>/devflow/draft_publish.json` and the same draft is not published twice. A token that may not make gists is FAILED with what to grant — the GitHub App devflow signs in through needs the account permission *Gists: Read and write*; a lost answer is FAILED and says the gist may exist, without a retry |
 
 The answer is `INVALID` (a check refused it), `NEEDS_INPUT` (a sound draft with open items for a
 person) or `DRAFTED` — never "ready". It stays in the run's workspace: `/ws/<run>/draft/issue.md`
 and `/ws/<run>/draft/report.md` (canonical SHA, related issues, sources, checks, what is open),
-and — with `draft_publish: gist` — at the secret gist the run's last line names. A secret gist is
-unlisted, not private: anyone who has its link can read it.
+and — when the run asked with `publish=gist` — at the secret gist the run's last line names. A
+secret gist is unlisted, not private: anyone who has its link can read it, which is why each run
+asks for itself. The report says no issue, pull request or repository was written, and points to
+the run's publish record for whether a gist was made.
 
 ```
 run_workflow.py start <id> devflow-draft long-task project=<p> "request=<what you want done>"

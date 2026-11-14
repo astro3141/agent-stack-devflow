@@ -356,44 +356,75 @@ def controls_draft_publish(ct):
         env, ws, c = drafted()
         verdict = c.get("verdict")
         ct.check("draft publish: the draft to publish was checked", verdict in ("DRAFTED", "NEEDS_INPUT"), True)
-
-        p = ct.step("draft_publish.py", ["scanner-fixture", verdict], env)
-        ct.check("draft publish: a registration that does not ask publishes nothing", (p.get("status"), len(gists())), ("SKIPPED", 0))
-        off = registration("none")
-        p = ct.step("draft_publish.py", [off, verdict], env)
-        ct.check("draft publish: draft_publish none publishes nothing", (p.get("status"), len(gists())), ("SKIPPED", 0))
-        bad = registration("public")
-        p = ct.step("draft_publish.py", [bad, verdict], env)
-        ct.check("draft publish: any mode but gist or none is refused — there is no public gist",
-                 (p.get("status"), len(gists())), ("FAILED", 0))
-
         on = registration("gist")
-        p = ct.step("draft_publish.py", [on, ""], env)
-        ct.check("draft publish: no verdict (check did not run) publishes nothing", (p.get("status"), len(gists())), ("SKIPPED", 0))
+
+        p = ct.step("draft_publish.py", [on, verdict, ""], env)
+        ct.check("draft publish: a project that allows it publishes nothing a run did not ask for",
+                 (p.get("status"), len(gists())), ("SKIPPED", 0))
         p = ct.step("draft_publish.py", [on, verdict], env)
+        ct.check("draft publish: … nor with the request left out", (p.get("status"), len(gists())), ("SKIPPED", 0))
+        p = ct.step("draft_publish.py", [on, verdict, "public"], env)
+        ct.check("draft publish: publish=public is refused — there is no public gist", (p.get("status"), len(gists())), ("FAILED", 0))
+        p = ct.step("draft_publish.py", ["scanner-fixture", verdict, "gist"], env)
+        ct.check("draft publish: a run that asks, in a project that does not allow it: REFUSED",
+                 (p.get("status"), "draft_publish: gist" in p.get("hint", ""), len(gists())), ("REFUSED", True, 0))
+        off = registration("none")
+        p = ct.step("draft_publish.py", [off, verdict, "gist"], env)
+        ct.check("draft publish: … and draft_publish none is the same", (p.get("status"), len(gists())), ("REFUSED", 0))
+        bad = registration("public")
+        p = ct.step("draft_publish.py", [bad, verdict, "gist"], env)
+        ct.check("draft publish: a registration mode but gist or none is refused", (p.get("status"), len(gists())), ("FAILED", 0))
+        p = ct.step("draft_publish.py", [on, "", "gist"], env)
+        ct.check("draft publish: no verdict (check did not run) publishes nothing", (p.get("status"), len(gists())), ("SKIPPED", 0))
+
+        p = ct.step("draft_publish.py", [on, verdict, "gist"], env)
         g = gists()
-        ct.check("draft publish: on, one secret gist with the issue and the report",
+        ct.check("draft publish: asked and allowed: one secret gist with the issue and the report",
                  (p.get("status"), len(g), bool(g) and g[0]["public"], sorted(g[0]["files"]) if g else []),
                  ("OK", 1, False, ["1-issue.md", "2-report.md"]))
+        ct.check("draft publish: … and the answer names the files that left", p.get("error"), "published: 1-issue.md, 2-report.md")
         ct.check("draft publish: … carrying the files as the run left them",
                  bool(g) and g[0]["files"]["1-issue.md"] == open(os.path.join(ws, "draft", "issue.md"), encoding="utf-8").read()
                  and g[0]["files"]["2-report.md"] == open(os.path.join(ws, "draft", "report.md"), encoding="utf-8").read(), True)
         ct.check("draft publish: … named by the run, the project, the canonical and the verdict",
                  bool(g) and all(x in g[0]["description"] for x in (env["AGENTSTACK_RUN_ID"], on, verdict, "not an issue")), True)
+        ct.check("draft publish: the report says no issue, PR or repository was written, and where the gist record is",
+                 bool(g) and "이슈·PR·저장소에는 아무것도 쓰지 않았습니다" in g[0]["files"]["2-report.md"]
+                 and "draft_publish.json" in g[0]["files"]["2-report.md"]
+                 and "GitHub에는 아무것도 쓰지 않았습니다" not in g[0]["files"]["2-report.md"], True)
         rec = json.load(open(os.path.join(ws, "devflow", "draft_publish.json"), encoding="utf-8"))
         ct.check("draft publish: the link is kept in the run's workspace", (rec.get("url") == p.get("url"), rec.get("secret")), (True, True))
-        again = ct.step("draft_publish.py", [on, verdict], env)
+        again = ct.step("draft_publish.py", [on, verdict, "gist"], env)
         ct.check("draft publish: the same draft again is not published twice", (again.get("url") == p.get("url"), len(gists())), (True, 1))
         rep_before = open(os.path.join(ws, "devflow", "draft_report.json"), encoding="utf-8").read()
 
+        # --- nothing that looks sensitive leaves
+        issue_path = os.path.join(ws, "draft", "issue.md")
+        clean = open(issue_path, encoding="utf-8").read()
+        leaks = [("github token", "토큰 ghu_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3"),
+                 ("private key", "-----BEGIN OPENSSH PRIVATE KEY-----"),
+                 ("credential assignment", "password: Hunter2Hunter2"),
+                 ("aws access key", "key AKIA" + "ABCDEFGHIJKLMNOP"),
+                 ("url with credentials", "https://admin:s3cretpass@scanner.example/"),
+                 ("private network address", "수집 대상 10.20.30.40 에서")]
+        for kind, line in leaks:
+            open(issue_path, "w", encoding="utf-8").write(clean + "\n" + line + "\n")
+            p = ct.step("draft_publish.py", [on, verdict, "gist"], env)
+            secret_part = line.split()[-1]
+            ct.check(f"draft publish: a {kind} in the draft refuses the publish, naming where — not the value",
+                     (p.get("status"), kind in p.get("error", ""), "1-issue.md:" in p.get("error", ""),
+                      secret_part in json.dumps(p, ensure_ascii=False), len(gists())),
+                     ("REFUSED", True, True, False, 1))
+        open(issue_path, "w", encoding="utf-8").write(clean)
+
         env2, ws2, c2 = drafted()
         sim.edit(lambda db: db.setdefault("faults", {}).update({"gists_denied": True}))
-        p = ct.step("draft_publish.py", [on, c2.get("verdict")], env2)
+        p = ct.step("draft_publish.py", [on, c2.get("verdict"), "gist"], env2)
         ct.check("draft publish: a token that may not make gists: FAILED, and what to grant",
                  (p.get("status"), "Gists" in p.get("hint", ""), len(gists())), ("FAILED", True, 1))
         sim.edit(lambda db: db["faults"].pop("gists_denied"))
         sim.edit(lambda db: db.setdefault("faults", {}).update({"lose_response": ["create_gist"]}))
-        p = ct.step("draft_publish.py", [on, c2.get("verdict")], env2)
+        p = ct.step("draft_publish.py", [on, c2.get("verdict"), "gist"], env2)
         ct.check("draft publish: a lost answer is FAILED and says the gist may exist — no retry",
                  (p.get("status"), "may have been made" in p.get("hint", ""), len(gists())), ("FAILED", True, 2))
         ct.check("draft publish: publishing changes nothing the check decided",

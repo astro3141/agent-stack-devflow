@@ -1,18 +1,24 @@
-"""devflow step: put a checked draft where a person can read it on GitHub — a secret gist, if the
-project's registration asks for one. The only write devflow-draft makes.
+"""devflow step: put a checked draft where a person can read it on GitHub — a secret gist, when
+this run asks for one and the project allows it. The only write devflow-draft makes.
 
-usage: draft_publish.py <project> <verdict>
+usage: draft_publish.py <project> <verdict> [<publish>]
 
   project   a registration under config/devflow/projects/<project>.yaml
   verdict   check's verdict (INVALID / NEEDS_INPUT / DRAFTED); "" when check did not run
+  publish   this run's request: "gist", or "" for none (the workflow input `publish`)
 
-Publishes only when the registration says `draft_publish: gist` (the instance's own configuration,
-not the project's canonical policy: where an operator reads drafts is the operator's choice). Then
-one secret gist of the token's account carries draft/issue.md (when the drafter wrote one) and
-draft/report.md, named by the run, the project, the canonical SHA and the verdict. A gist is not an
-issue: nothing in the repository changes, and nothing devflow reads ever reads it back.
-
-A secret gist is unlisted, not private: anyone with its link can read it.
+Two keys, both required, because a secret gist is unlisted, not private — anyone with its link can
+read it, and a draft of a private repository's work may carry that repository's content:
+  * the run asks: `publish=gist` when it is started. Nothing is published by default, and a
+    project's setting alone never publishes anything.
+  * the project allows: `draft_publish: gist` in its registration (the instance's own file, not the
+    project's canonical policy). Without it a request is refused.
+Then the files are scanned before anything leaves (credentials, tokens, private keys, credential
+assignments, private-network addresses): a finding refuses the publish and names the file, line
+and kind — never the value. Otherwise one secret gist of the token's account carries
+draft/issue.md (when the drafter wrote one) and draft/report.md, named by the run, the project, the
+canonical SHA and the verdict. A gist is not an issue: nothing in the repository changes, and
+nothing devflow reads ever reads it back.
 
 Never changes the draft's outcome. A gist that could not be made is reported (status FAILED, with
 the reason and, for a token that may not make gists, what to grant) and the run ends as check said.
@@ -27,6 +33,7 @@ import json, os, sys
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(PKG, "lib"))
 import dfcore  # noqa: E402
+import draftlib  # noqa: E402
 import step  # noqa: E402
 
 WS = dfcore.workspace()
@@ -34,6 +41,7 @@ D = os.path.join(WS, "devflow")
 DRAFT = os.path.join(WS, "draft")
 RECORD = os.path.join(D, "draft_publish.json")
 MODES = ("", "none", "gist")
+REQUESTS = ("", "none", "gist")
 GRANT_HINT = ("the GitHub App devflow signs in through needs the account permission 'Gists: Read "
               "and write' (GitHub → Settings → Developer settings → GitHub Apps → the App → "
               "Permissions); accept the change on GitHub, then publish again — or set "
@@ -56,9 +64,16 @@ def read(path):
 
 def main(argv):
     if len(argv) < 1:
-        emit(status="FAILED", error="usage: draft_publish.py <project> <verdict>")
+        emit(status="FAILED", error="usage: draft_publish.py <project> <verdict> [<publish>]")
         return 0
     project, verdict = argv[0], (argv[1] if len(argv) > 1 else "").strip()
+    request = (argv[2] if len(argv) > 2 else "").strip().lower()
+    if request not in REQUESTS:
+        emit(status="FAILED", error=f"publish={request!r} is not one of {list(REQUESTS[1:])} — there is no public gist")
+        return 0
+    if request != "gist":
+        emit(status="SKIPPED", error="this run did not ask to publish (publish=gist)")
+        return 0
     reg = dfcore.registration(project)
     mode = str(reg.get("draft_publish") or "").strip().lower()
     if mode not in MODES:
@@ -66,7 +81,8 @@ def main(argv):
              hint=f"in {reg['_path']}")
         return 0
     if mode != "gist":
-        emit(status="SKIPPED", error="publishing is off for this project (draft_publish)")
+        emit(status="REFUSED", error=f"this run asked to publish, and project {project!r} does not allow it",
+             hint=f"draft_publish: gist in {reg['_path']} allows it (the operator's choice)")
         return 0
     report = read(os.path.join(DRAFT, "report.md"))
     if not verdict or report is None:
@@ -76,6 +92,12 @@ def main(argv):
     issue = read(os.path.join(DRAFT, "issue.md"))
     if issue is not None and issue.strip():
         files["1-issue.md"] = issue
+    found = draftlib.sensitive(files)
+    if found:
+        where = ", ".join(f"{f['file']}:{f['line']} ({f['kind']})" for f in found[:12])
+        emit(status="REFUSED", error=f"not published — {len(found)} line(s) look sensitive: {where}",
+             hint="read those lines in /ws/<run>/draft/; nothing left the workspace")
+        return 0
     digest = dfcore.sha256(json.dumps(files, sort_keys=True, ensure_ascii=False))[:16]
     try:
         prev = json.load(open(RECORD, encoding="utf-8"))
@@ -111,7 +133,7 @@ def main(argv):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(rec, f, ensure_ascii=False, indent=1)
     os.replace(tmp, RECORD)
-    emit(status="OK", url=rec["url"], gist=rec["gist"])
+    emit(status="OK", url=rec["url"], gist=rec["gist"], error="published: " + ", ".join(sorted(files)))
     return 0
 
 

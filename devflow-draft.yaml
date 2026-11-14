@@ -5,7 +5,7 @@
 #     └──────────────┴─────────────────────────────────────▶ record
 #
 #   run_workflow.py start <id> devflow-draft long-task project=<p> "request=<what you want done>"
-#   run_workflow.py start <id> devflow-draft long-task project=<p> request_file=<name>
+#   run_workflow.py start <id> devflow-draft long-task project=<p> request_file=<name> [publish=gist]
 #     (the request as a file in the hand-in directory, /work/handoff/<name>: any language, any length)
 #
 # gather reads through a remote that refuses every write (lib/remote.py ReadOnly): the canonical
@@ -17,9 +17,10 @@
 # the run's workspace (/ws/<run>/draft/): nothing is posted, no issue is created or edited, nothing
 # is approved. A draft is not an issue, an approval or permission to run.
 #
-# publish is the one write, and only when the project's registration says `draft_publish: gist`:
-# a secret gist of the token's account with draft/issue.md and draft/report.md, for reading on
-# GitHub. Not an issue, nothing in the repository; it never changes the draft's outcome.
+# publish is the one write, and only when this run asks (`publish=gist`) and the project's
+# registration allows it (`draft_publish: gist`), and the files pass a scan for credentials and
+# private addresses: a secret gist of the token's account with draft/issue.md and draft/report.md.
+# Not an issue, nothing in the repository; it never changes the draft's outcome.
 workflow:
   name: devflow-draft
   description: Draft a devflow task issue from a request — grounded, checked, read only
@@ -44,6 +45,11 @@ workflow:
       required: false
       default: ""
       description: the request as a hand-in by name (/work/handoff/<name>, UTF-8) — for any other language or length; exactly one of request and request_file
+    publish:
+      type: string
+      required: false
+      default: ""
+      description: "gist to share this run's draft as a secret gist (the project must allow it: draft_publish gist); empty for none"
     fixture:
       type: string
       required: false
@@ -159,10 +165,10 @@ agents:
 
   - name: publish
     type: script
-    description: A secret gist of the checked draft, for reading on GitHub — only if the registration asks (draft_publish gist)
+    description: A secret gist of the checked draft — only when this run asks (publish gist), the project allows it, and the scan finds nothing sensitive
     command: "${POC_PY:-/opt/venv/bin/python}"
     args: ["/work/packages/devflow/steps/draft_publish.py", "{{ workflow.input.project }}",
-           "{{ check.output.verdict }}"]
+           "{{ check.output.verdict }}", "{{ workflow.input.publish }}"]
     timeout: 120
     output:
       status: {type: string}

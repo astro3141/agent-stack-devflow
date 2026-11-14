@@ -181,7 +181,8 @@ def check(ctx, issue_md, rep, pol):
 
 def report_md(ctx, rep, res, verdict):
     L = [f"# Issue draft — {verdict}", "",
-         "초안입니다. 이슈도, 승인도, 실행 권한도 아닙니다. GitHub에는 아무것도 쓰지 않았습니다.", "",
+         "초안입니다. 이슈도, 승인도, 실행 권한도 아닙니다. GitHub의 이슈·PR·저장소에는 아무것도 쓰지 않았습니다. "
+         "비공개 Gist로 공유했는지는 이 실행의 게시 기록(devflow/draft_publish.json)에 있습니다.", "",
          f"- 요청 digest `{ctx['request_digest']}` · 프로젝트 `{ctx['project']}` ({ctx['repository']})",
          f"- canonical `{ctx['canonical']}` ({ctx['canonical_branch']}) · policy `{ctx['policy']['digest']}` · "
          f"workflow {ctx['workflow']['version']}/{ctx['workflow']['digest']}",
