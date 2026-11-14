@@ -10,7 +10,11 @@ Driven from controls.py (`controls_draft(controls)`). What it pins:
   * a change class needs evidence at the canonical commit; without it the class stays unresolved
     (open, for a person), and the project's hook refuses a class below the floor its paths imply
   * every fact has a source a person can open; every unknown is research, a contract gap or a decision
-  * the prose claims no state nobody verified; a claim word inside a code block is not a claim
+  * what the work would change (scope_candidates — the hook's changed files) and what it only reads
+    (reference_files — never the hook's) are told apart, and the issue body's scope section says the
+    same: a protected file the work would change is refused for ORDINARY and cannot pass as a reference
+  * the prose claims no state nobody verified; a claim word inside a code block is not a claim, and a
+    negated one ("승인된 범위 아님", "not approved") says what is not so — each occurrence on its own
   * a drafter that changes the checkout, or produces nothing, gives INVALID — never a draft
 
 Integration controls of the machinery, not a claim that a live model or live GitHub ran.
@@ -38,7 +42,9 @@ def draft_db(ct):
     db = ct.build.scanner_pass()
     r = ct.R(db)
     c = r["branches"][ct.build.CANONICAL]
-    files = dict(r["commits"][c]["files"], **{".devflow/templates/task.md": TEMPLATE})
+    files = dict(r["commits"][c]["files"], **{".devflow/templates/task.md": TEMPLATE,
+                 "docs/implementation/linux-item-implementation-matrix.md": "| U-18 | 정식구현 |\n",
+                 "items/kisa/U-18.yaml": "id: U-18\n"})
     new = "c" + ct.build.sha(json.dumps([c, files], sort_keys=True))[:39]
     r["commits"][new] = {"parents": [c], "files": files, "author": "astro3141"}
     r["branches"][ct.build.CANONICAL] = new
@@ -71,11 +77,19 @@ ORD_REPORT = {"title": "U-02 password complexity", "relation": "new", "related":
               "unknowns": []}
 
 
-def drafter(text=None, report=None, fields=None, prose="## 해결할 문제\nU-02 비밀번호 복잡성.\n\n", touch=None, produce=True):
-    """What a drafter writes: draft/issue.md and devflow/draft.json in its workspace."""
+def scope_md(paths):
+    return "\n<!-- devflow:scope -->\n" + ("".join(f"- `{p}` — changes\n" for p in paths) or "- (없음)\n") \
+        + "<!-- /devflow:scope -->\n"
+
+
+def drafter(text=None, report=None, fields=None, prose="## 해결할 문제\nU-02 비밀번호 복잡성.\n\n", touch=None, produce=True,
+            scope=None):
+    """What a drafter writes: draft/issue.md and devflow/draft.json in its workspace. The body states
+    the report's scope candidates as its scope section, unless `scope` (the section, or "") is given."""
     def model(ws):
         os.makedirs(os.path.join(ws, "draft"), exist_ok=True)
-        body = text if text is not None else prose + block(**(fields if fields is not None else ORD_BLOCK))
+        said = scope if scope is not None else scope_md((report if report is not None else ORD_REPORT).get("scope_candidates") or [])
+        body = text if text is not None else prose + block(**(fields if fields is not None else ORD_BLOCK)) + said
         open(os.path.join(ws, "draft", "issue.md"), "w", encoding="utf-8").write(body)
         if touch:
             open(os.path.join(ws, "repo", touch), "w", encoding="utf-8").write("changed by the drafter\n")
@@ -225,6 +239,73 @@ def controls_draft(ct):
         ct.check("draft: a claim word quoted as inline code is not a claim", rep.get("blocking"), [])
         g, c, rep, _, _ = run("KISA U-02", drafter(prose="## 해결할 문제\n`U-02` is confirmed.\n\n"))
         ct.check("draft: … while the prose around inline code is still read", has(rep, "blocking", "claims a state nobody verified"), True)
+
+        # --- what changes and what is only read (U-18: the implementation matrix is read, not changed)
+        MATRIX = "docs/implementation/linux-item-implementation-matrix.md"
+        U18 = dict(ORD_REPORT, scope_candidates=["items/kisa/U-18.yaml", "tests/test_u18_shadow_perm.py"],
+                   reference_files=[MATRIX, "docs/TECHNICAL_DESIGN_v0.3.md"])
+        U18_BLOCK = dict(ORD_BLOCK, id="T-U18", goal="align KISA U-18 with its criterion", items=["U-18"])
+        U18_PROSE = "## 해결할 문제\nU-18. 후보 범위(승인된 범위 아님). 구현 매트릭스(`" + MATRIX + "`)는 참고만 한다.\n\n"
+        g, c, rep, _, ws = run("KISA U-18 /etc/shadow", drafter(report=U18, fields=U18_BLOCK, prose=U18_PROSE))
+        ct.check("draft U-18: the matrix as a reference is not a changed file — the hook passes, nothing is blocked",
+                 (c.get("verdict"), rep.get("blocking"), rep.get("scope_candidates"), rep.get("reference_files")),
+                 ("DRAFTED", [], U18["scope_candidates"], U18["reference_files"]))
+        ct.check("draft U-18: the report says what the hook read and what it did not",
+                 (has(rep, "notes", "reference files (read, not changed; not given to the hook): " + MATRIX),
+                  "## 참고 파일 (읽기만, 변경 없음)" in open(os.path.join(ws, "draft", "report.md"), encoding="utf-8").read()),
+                 (True, True))
+        chg = dict(U18, scope_candidates=U18["scope_candidates"] + [MATRIX], reference_files=["docs/TECHNICAL_DESIGN_v0.3.md"])
+        g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=chg, fields=U18_BLOCK, prose=U18_PROSE))
+        ct.check("draft U-18: ORDINARY that would change the matrix is still refused by the hook",
+                 (c.get("verdict"), has(rep, "blocking", "hook: an ordinary change may not touch authority documents")),
+                 ("INVALID", True))
+        hidden = dict(U18)
+        g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=hidden, fields=U18_BLOCK, prose=U18_PROSE,
+                                                                 scope=scope_md(U18["scope_candidates"] + [MATRIX])))
+        ct.check("draft U-18: a change the body states cannot pass as a reference (the hook is not skipped)",
+                 (c.get("verdict"), has(rep, "blocking", "the issue body's scope names ['" + MATRIX + "'], which scope_candidates does not (it lists them as reference files)")),
+                 ("INVALID", True))
+        g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=dict(chg, reference_files=[MATRIX]), fields=U18_BLOCK, prose=U18_PROSE))
+        ct.check("draft U-18: a file in both lists is refused, and the hook still reads it as changed",
+                 (has(rep, "blocking", "are both a scope candidate and a reference file"),
+                  has(rep, "blocking", "hook: an ordinary change may not touch authority documents")), (True, True))
+        for name, report, said, want in (
+                ("a scope candidate the body does not state", U18, scope_md(["items/kisa/U-18.yaml"]),
+                 "scope_candidates names ['tests/test_u18_shadow_perm.py'], which the issue body's scope does not"),
+                ("no scope section", U18, "", "the issue body has 0 scope sections"),
+                ("two scope sections", U18, scope_md(U18["scope_candidates"]) * 2, "the issue body has 2 scope sections"),
+                ("a reference not at the canonical commit", dict(U18, reference_files=["docs/nowhere.md"]), None,
+                 "reference files not at the canonical commit: ['docs/nowhere.md']"),
+                ("reference_files that is not a list of paths", dict(U18, reference_files="docs"), None,
+                 "reference_files is not a list of paths")):
+            g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=report, fields=U18_BLOCK, prose=U18_PROSE, scope=said))
+            ct.check(f"draft U-18: {name} is INVALID", (c.get("verdict"), has(rep, "blocking", want)), ("INVALID", True))
+        # the official criterion and the Foundation contracts are not changed under ORDINARY
+        for name, path, want in (("the official criterion", "docs/baselines/current/주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드.pdf", "criterion_changed"),
+                                 ("a Foundation contract (TD)", "docs/TECHNICAL_DESIGN_v0.3.md", "hook: an ordinary change may not touch authority documents"),
+                                 ("a frozen registry", "primitives.yaml", "hook: declared ORDINARY")):
+            r = dict(U18, scope_candidates=["items/kisa/U-18.yaml", path], reference_files=[MATRIX])
+            g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=r, fields=U18_BLOCK, prose=U18_PROSE))
+            if want == "criterion_changed":
+                ct.check(f"draft U-18: changing {name} is not ordinary item work — the hook reads it as a criterion change",
+                         has(rep, "notes", "criterion_changed"), True)
+            else:
+                ct.check(f"draft U-18: changing {name} under ORDINARY is refused", (c.get("verdict"), has(rep, "blocking", want)),
+                         ("INVALID", True))
+        legacy = {k: v for k, v in ORD_REPORT.items() if k != "reference_files"}
+        g, c, rep, _, _ = run("KISA U-02", drafter(report=legacy))
+        ct.check("draft: a report without reference_files (devflow/draft@1) still reads — its references are none",
+                 (c.get("verdict"), rep.get("reference_files"), rep.get("schema")), ("DRAFTED", [], "devflow/draft@2"))
+
+        # --- a negated claim word says what is not so; each occurrence is read on its own
+        for line in ("후보 범위(승인된 범위 아님): 아래 파일.", "승인되지 않은 초안이다.", "이 범위는 승인된 것이 아니다.",
+                     "검증 완료되지 않음.", "The scope is not approved.", "This has not been verified."):
+            g, c, rep, _, _ = run("KISA U-02", drafter(prose=f"## 해결할 문제\n{line}\n\n"))
+            ct.check(f"draft: the negated {line!r} is not a claim", (c.get("verdict"), rep.get("blocking")), ("DRAFTED", []))
+        for line in ("후보 범위(승인된 범위 아님), 그러나 D-1은 승인됨.", "Not approved, but verified by CI.",
+                     "승인된 작업이며 아직 검증되지 않았다.", "D-1 승인됨 (승인된 범위 아님)", "범위는 승인됨."):
+            g, c, rep, _, _ = run("KISA U-02", drafter(prose=f"## 해결할 문제\n{line}\n\n"))
+            ct.check(f"draft: the claim in {line!r} is still INVALID", has(rep, "blocking", "claims a state nobody verified"), True)
 
         # --- the drafter's own failures
         g, c, rep, _, _ = run("KISA U-02", drafter(touch="primitives.yaml"))

@@ -196,6 +196,8 @@ def main(argv):
                   + draftlib.comments_excerpt(discussion.get(i["number"]) or [])
                   for i in issues if i["number"] in strong) or "(none)",
               "RULE_PATHS": [reg["policy_path"]] + list(pol_doc.get("rule_paths") or []),
+              "POLICY_PATHS": pol_doc.get("paths") or "(the policy names no paths by role)",
+              "SCOPE_OPEN": draftlib.SCOPE_OPEN, "SCOPE_CLOSE": draftlib.SCOPE_CLOSE,
               "ISSUE_FILE": os.path.join(DRAFT, "issue.md"), "OUT": os.path.join(D, "draft.json")}
     tpl = open(os.path.join(PKG, "prompts", "draft.md"), encoding="utf-8").read()
     text = fill(tpl, values)

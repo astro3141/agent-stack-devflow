@@ -39,6 +39,13 @@ GitHub, approve nothing and change nothing in the repository. A person reads you
 {CRITERIA}
 - The project's rules (never part of a task's scope; changing them is a person's decision):
   {RULE_PATHS}
+- The paths the project's policy names by role. The project's hook reads your `scope_candidates`
+  against them to decide which change class the work needs, and refuses a scope a class may not
+  change (the policy's own comments say which):
+
+```json
+{POLICY_PATHS}
+```
 
 ## Existing issues
 
@@ -76,7 +83,17 @@ Before drafting anything new, decide the request's relation to the existing work
 
 1. `{ISSUE_FILE}` — the issue body, in the template's sections and language, with exactly one
    ` ```devflow ` block (except for `duplicate`). The block's `id`, `type` and `goal` are required.
-   Use only values the vocabulary above allows.
+   Use only values the vocabulary above allows. It states the change scope in exactly one section
+   between these two lines, one list item per file, the path first in inline code — the same files as
+   `scope_candidates`, no more and no fewer (`- (없음)` when there are none):
+
+   ```markdown
+   {SCOPE_OPEN}
+   - `path/of/a/file` — why the work would change it
+   {SCOPE_CLOSE}
+   ```
+
+   Files you only read or cite (a criterion, a contract, a planning table) are not in this section.
 2. `{OUT}` — your report, JSON:
 
 ```json
@@ -88,7 +105,8 @@ Before drafting anything new, decide the request's relation to the existing work
                     "status": "candidate | unresolved",
                     "evidence": [{"path": "a file in the repository", "why": "what in it decides the class"}],
                     "alternatives": ["another class it could be, and what would decide between them"]},
- "scope_candidates": ["files the work would likely change — candidates, not an approved scope"],
+ "scope_candidates": ["files the work would change — candidates, not an approved scope"],
+ "reference_files": ["files you read or cite that the work does not change"],
  "facts": [{"text": "something the repository or an issue states", "source": "path, path:line, or #n"}],
  "inferences": [{"text": "something you conclude", "from": ["the facts it rests on"]}],
  "unknowns": [{"text": "what is not known", "kind": "research | contract_gap | decision",
@@ -111,7 +129,15 @@ Before drafting anything new, decide the request's relation to the existing work
   Never pick a lower class to make the task look simpler.
 - **No claim of a state you did not verify.** Do not write that anything is confirmed, verified,
   approved, ready or 확정/검증 완료/준비 완료/승인 — you verified nothing and no one approved anything.
-  Write what is drafted and what is open.
+  Write what is drafted and what is open. Saying what is *not* so is fine ("승인된 범위 아님",
+  "not approved").
+- **What changes and what is only read are separate.** `scope_candidates` are the files the work
+  would change; the hook classifies exactly these. `reference_files` are files the work reads or
+  cites and does not change; the hook never sees them. A file is in one list or the other, never
+  both. If the work would change a file, it is a scope candidate even when the policy protects it —
+  listing it as a reference to get past the hook is a false draft. When the class you propose may
+  not change a file the work seems to need, either the class is wrong (say so in `alternatives`), or
+  that change is not this task's (leave it out of the scope and add an unknown of kind `decision`).
 - Do not propose changing the project's rules as part of a task's scope, and do not weaken a
   criterion, a test's expectation or a contract to make the work fit.
 - Write only `{ISSUE_FILE}` and `{OUT}`. The repository is read only.

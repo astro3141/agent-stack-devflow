@@ -6,14 +6,18 @@ Reads what draft_gather fixed (devflow/draft_context.json, the canonical tree in
 devflow/policy/) and what the drafter wrote (draft/issue.md, devflow/draft.json), and checks:
 
   * the ```devflow block parses with devflow's own parser, and its values are the policy's
-  * the project's hook classifies it (classify, with the drafter's scope candidates as the files):
-    its problems, decisions and gaps are listed as open; its violations refuse the draft
+  * what the work would change and what it only reads are told apart: scope_candidates go to the
+    project's hook (classify, as the changed files) and reference_files never do; a file is never in
+    both, every reference exists at the canonical commit, and the issue body's scope section names
+    exactly the scope candidates — a file the body says will change cannot pass as a reference
+  * the hook's problems, decisions and gaps are listed as open; its violations refuse the draft
   * a change class is in the block only with evidence that exists at the canonical commit
   * every fact has a source a person can open (a file at the canonical commit, or an issue)
   * every unknown is research, a contract gap or a decision
   * every issue found mechanically to be related is addressed, and "new" is not claimed for work an
     existing issue already covers
-  * the prose claims no state nobody verified (confirmed, ready, approved, 확정, 준비 완료, ...)
+  * the prose claims no state nobody verified (confirmed, ready, approved, 확정, 준비 완료, ...);
+    a negated mention in its own clause ("승인된 범위 아님", "not approved") says what is not so
   * the drafter changed nothing in the checkout
 
 Answers `verdict`: INVALID (a check refused it), NEEDS_INPUT (a sound draft with open items for a
@@ -62,6 +66,21 @@ def source_ok(src, numbers):
     return bool(m) and in_repo(m.group("path"))
 
 
+def scope_lists(rep):
+    """scope_candidates and reference_files as lists of paths, and what is wrong with their shape.
+    A report without reference_files (devflow/draft@1) has none."""
+    out, errs = [], []
+    for key in ("scope_candidates", "reference_files"):
+        v = rep.get(key)
+        if v is None:
+            v = []
+        if not isinstance(v, list) or not all(isinstance(x, str) and x.strip() for x in v):
+            errs.append(f"{key} is not a list of paths")
+            v = [x for x in v if isinstance(x, str) and x.strip()] if isinstance(v, list) else []
+        out.append([os.path.normpath(x.strip()) for x in v])
+    return out[0], out[1], errs
+
+
 def check(ctx, issue_md, rep, pol):
     blocking, open_, notes = [], [], []
     numbers = {r["number"]: r for r in ctx["issues"]}
@@ -108,6 +127,8 @@ def check(ctx, issue_md, rep, pol):
             if task is None:
                 blocking.append(f"task block: {why}")
     cls = rep.get("classification") or {}
+    scope, refs, shape_err = scope_lists(rep)
+    blocking += shape_err
     if task:
         if voc.get("task_types") and task.get("type") not in voc["task_types"]:
             blocking.append(f"type {task.get('type')!r} is not one of {voc['task_types']}")
@@ -134,8 +155,7 @@ def check(ctx, issue_md, rep, pol):
                 blocking.append(f"the block says {task['change_class']}, the report {cls.get('change_class')!r}")
         else:
             open_.append("change class unresolved: " + ("; ".join(map(str, cls.get("alternatives") or [])) or "no alternatives given"))
-        # the project's own reading of it
-        scope = [s for s in (rep.get("scope_candidates") or []) if isinstance(s, str)]
+        # the project's own reading of it — of what the work would change, never of what it only reads
         payload_task = dict(task, issue=0)
         try:
             got = dfcore.run_hook(pol, os.path.join(D, "policy"), "classify", {
@@ -159,6 +179,31 @@ def check(ctx, issue_md, rep, pol):
             open_ += [f"hook classification shape: {p}" for p in shape]
         notes.append("impacts the hook reads from the scope candidates: "
                      + (", ".join(sorted(k for k, v in (got.get("impacts") or {}).items() if v)) or "(none)"))
+
+    # what changes and what is only read
+    if task:
+        stated = draftlib.scope_sections(issue_md)
+        if len(stated) != 1:
+            blocking.append(f"the issue body has {len(stated)} scope sections ({draftlib.SCOPE_OPEN} … "
+                            f"{draftlib.SCOPE_CLOSE}); a task issue states its change scope in exactly one")
+        else:
+            said_scope = {os.path.normpath(p) for p in stated[0]}
+            body_only = sorted(said_scope - set(scope))
+            json_only = sorted(set(scope) - said_scope)
+            if body_only:
+                blocking.append(f"the issue body's scope names {body_only[:6]}, which scope_candidates does not"
+                                + (" (it lists them as reference files)" if set(body_only) & set(refs) else ""))
+            if json_only:
+                blocking.append(f"scope_candidates names {json_only[:6]}, which the issue body's scope does not")
+    both = sorted(set(scope) & set(refs))
+    if both:
+        blocking.append(f"{both[:6]} are both a scope candidate and a reference file — a file the work would "
+                        "change is a scope candidate, and the hook reads it as one")
+    gone = [r for r in refs if not in_repo(r)]
+    if gone:
+        blocking.append(f"reference files not at the canonical commit: {gone[:6]}")
+    if refs:
+        notes.append("reference files (read, not changed; not given to the hook): " + ", ".join(refs[:12]))
 
     # facts, inferences, unknowns
     for f in rep.get("facts") or []:
@@ -201,6 +246,9 @@ def report_md(ctx, rep, res, verdict):
     L += ["", "## 분류", "", f"- change_class: `{cls.get('change_class')}` · 상태 `{cls.get('status')}`"]
     L += [f"  - 근거 {e.get('path')}: {e.get('why')}" for e in cls.get("evidence") or [] if isinstance(e, dict)]
     L += [f"  - 대안: {a}" for a in cls.get("alternatives") or []]
+    scope, refs, _ = scope_lists(rep)
+    L += ["", "## 변경 후보 (hook이 분류한 파일)", ""] + ([f"- `{p}`" for p in scope] or ["- (없음)"])
+    L += ["", "## 참고 파일 (읽기만, 변경 없음)", ""] + ([f"- `{p}`" for p in refs] or ["- (없음)"])
     L += ["", "## 사실 (출처)", ""] + [f"- {f.get('text')} — `{f.get('source')}`" for f in rep.get("facts") or [] if isinstance(f, dict)]
     L += ["", "## 추론", ""] + [f"- {i.get('text')} ← {i.get('from')}" for i in rep.get("inferences") or [] if isinstance(i, dict)]
     L += ["", "## 검증 결과", ""]
@@ -260,7 +308,8 @@ def main(argv):
     out = {"schema": draftlib.DRAFT_SCHEMA, "verdict": verdict, "canonical": ctx["canonical"],
            "request_digest": ctx["request_digest"], "policy": ctx["policy"], "workflow": ctx["workflow"],
            "relation": rep.get("relation"), "related": rep.get("related") or [],
-           "candidates": ctx["candidates"], "task": res.get("task"), **{k: res[k] for k in ("blocking", "open", "notes")},
+           "candidates": ctx["candidates"], "task": res.get("task"),
+           "scope_candidates": scope_lists(rep)[0], "reference_files": scope_lists(rep)[1], **{k: res[k] for k in ("blocking", "open", "notes")},
            "issue": os.path.join(DRAFT, "issue.md") if issue_md else ""}
     path = os.path.join(D, "draft_report.json")
     json.dump(out, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)

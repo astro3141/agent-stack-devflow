@@ -8,7 +8,13 @@ import re
 import dfcore
 
 DRAFTER = "devflow-drafter"
-DRAFT_SCHEMA = "devflow/draft@1"
+# @2: the drafter's report separates reference_files (read, cited, never changed) from
+# scope_candidates (what the work would change — the only files the project's hook classifies), and
+# the issue body states the same scope between SCOPE_OPEN and SCOPE_CLOSE. A @1 report (no
+# reference_files) still reads: its references are none.
+DRAFT_SCHEMA = "devflow/draft@2"
+SCOPE_OPEN = "<!-- devflow:scope -->"
+SCOPE_CLOSE = "<!-- /devflow:scope -->"
 TEMPLATE_DEFAULT = ".devflow/templates/task.md"
 RELATIONS = ("new", "update", "follow_up", "duplicate")
 UNKNOWN_KINDS = ("research", "contract_gap", "decision")
@@ -22,7 +28,33 @@ WORD = re.compile(r"[0-9A-Za-z가-힣_]{2,}")
 # words that claim a state only a verification or a person can give (requirement: no "confirmed" or
 # "ready" without it). Matched in the draft's prose, outside code fences.
 CLAIM = re.compile(r"(?i)\b(confirmed|verified|ready to (?:implement|merge|start)|approved)\b"
-                   r"|확정(?:됨|되었|했|된)|검증(?:됨|되었|완료)|준비\s*완료|승인(?:됨|되었|된)")
+                   r"|확정(?:됨|되었|했|된)|검증(?:됨|되었|\s*완료)|준비\s*완료|승인(?:됨|되었|된)")
+# A claim word negated in its own clause says what is NOT so ("승인된 범위 아님", "검증 완료되지 않음",
+# "not approved", "has not been verified") — that is the honest wording the drafter is asked for, not a
+# claim. Each occurrence is read on its own: a negated one does not excuse another in the same line
+# ("승인된 범위 아님, D-1은 승인됨" is still a claim). The negation must be close and in the same
+# clause — punctuation and a clause-joining ending or conjunction end the clause.
+CLAUSE_END = re.compile(r"[,.;:!?()\[\]，。、·—–]|\s(?:but|however|although|though|whereas|while|and|so)\b"
+                        r"|\s(?:그러나|하지만|그런데|그리고|다만)(?=\s|$)", re.I)
+KO_NEG = re.compile(r"아니|아닌|아님|않|없|못|^안$|^전(?:이|에|$)")
+KO_JOIN = re.compile(r"(?:며|고|지만|는데|으나|면서|어서|아서)$")
+EN_NEG = re.compile(r"^(?:not|never|no|nothing|none|neither|nor|without|cannot|yet-to-be)$|n't$", re.I)
+
+
+def _negated(line, m):
+    if re.search(r"[가-힣]", m.group(0)):
+        # Korean negates after the word: the rest of its own word, then at most two more words
+        rest = CLAUSE_END.split(line[m.end():], maxsplit=1)[0]
+        words = rest.split()  # the first is the rest of the word itself when it goes on ("확정되었|다")
+        for w in words[:3]:
+            if KO_NEG.search(w):
+                return True
+            if KO_JOIN.search(w):
+                return False
+        return False
+    # English negates before the word, within the last four words of its clause
+    before = CLAUSE_END.split(line[:m.start()])[-1].split()
+    return any(EN_NEG.search(w.strip("\"'*_")) for w in before[-4:])
 FENCE = re.compile(r"```.*?```", re.S)
 INLINE = re.compile(r"`[^`\n]+`")
 
@@ -141,10 +173,31 @@ def claims(text):
     """Lines of prose that claim a verified or ready state."""
     out = []
     for n, line in enumerate(prose(text).splitlines(), 1):
-        m = CLAIM.search(line)
-        if m:
-            out.append({"line": line.strip()[:200], "word": m.group(0)})
+        for m in CLAIM.finditer(line):
+            if not _negated(line, m):
+                out.append({"line": line.strip()[:200], "word": m.group(0)})
+                break
     return out
+
+
+SCOPE_ITEM = re.compile(r"^\s*[-*+]\s+`([^`\n]+)`")
+
+
+def scope_sections(text):
+    """The change scope the issue body states: one list per SCOPE_OPEN … SCOPE_CLOSE section, each
+    item's path the first inline code of a list line ("- `items/kisa/U-18.yaml` — why")."""
+    out, i = [], 0
+    text = text or ""
+    while True:
+        a = text.find(SCOPE_OPEN, i)
+        if a < 0:
+            return out
+        b = text.find(SCOPE_CLOSE, a)
+        body = text[a + len(SCOPE_OPEN): b if b >= 0 else len(text)]
+        out.append([m.group(1).strip() for m in map(SCOPE_ITEM.match, body.splitlines()) if m])
+        if b < 0:
+            return out
+        i = b + len(SCOPE_CLOSE)
 
 
 # what must not leave in a gist. Deterministic and deliberately broad: a refused publish costs a
