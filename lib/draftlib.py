@@ -193,6 +193,22 @@ def claims(text):
     return out
 
 
+def per_file_once(notes, files):
+    """The hook's notes, one line per message: "<file>: <message>" said of several scope files
+    becomes "<message> — [files]": the same sentence five times tells a person nothing new."""
+    out, by = [], {}
+    for n in notes:
+        path, sep, msg = str(n).partition(": ")
+        if sep and path in files:
+            if msg not in by:
+                by[msg] = []
+                out.append(msg)
+            by[msg].append(path)
+        else:
+            out.append(n)
+    return [f"{x} — {by[x]}" if x in by else x for x in out]
+
+
 SCOPE_ITEM = re.compile(r"^\s*[-*+]\s+`([^`\n]+)`")
 SCOPE_MARK = re.compile(re.escape(SCOPE_OPEN) + "|" + re.escape(SCOPE_CLOSE))
 

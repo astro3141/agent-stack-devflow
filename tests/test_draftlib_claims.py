@@ -84,5 +84,14 @@ class ScopeSections(unittest.TestCase):
                          ([["b"]], [f"{O} again before {C}"]))
 
 
+class HookNotesOnce(unittest.TestCase):
+    def test_a_note_said_of_several_files_is_one_line(self):
+        msg = "base or head text not given (a new or deleted file, or the engine passed none) — read as a change of meaning"
+        files = ["collector/collect.sh", "evaluator/check_registry.py", "evaluator/x.py"]
+        notes = [f"{f}: {msg}" for f in files] + ["impacts: none", "docs/elsewhere.md: not a scope file"]
+        self.assertEqual(draftlib.per_file_once(notes, files),
+                         [f"{msg} — {files}", "impacts: none", "docs/elsewhere.md: not a scope file"])
+
+
 if __name__ == "__main__":
     unittest.main()

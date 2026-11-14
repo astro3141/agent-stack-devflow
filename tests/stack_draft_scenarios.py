@@ -300,6 +300,17 @@ def controls_draft(ct):
             ct.check(f"draft U-18: changing {name} under ORDINARY is refused, and is a person's decision besides",
                      (c.get("verdict"), has(rep, "blocking", want), has(rep, "open", "decision: the scope would change the contract file(s)")),
                      ("INVALID", True, True))
+        # the report says a thing once: a contract the proposed class's prepare gate already approves
+        # is noted, not listed again as a decision (a hook note repeated per file: test_draftlib_claims)
+        FND_BLOCK = dict(U18_BLOCK, change_class="FOUNDATION", impacts=["contract_changed"], scope_files=["evaluator/check_registry.py"])
+        owners = ["evaluator/check_registry.py", "evaluator/evaluator.py", "collector/collect.sh"]
+        r = dict(U18, scope_candidates=owners, classification={"change_class": "FOUNDATION", "status": "candidate",
+                 "evidence": [{"path": "primitives.yaml", "why": "a new check"}], "alternatives": []})
+        g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=r, fields=FND_BLOCK, prose=U18_PROSE))
+        ct.check("draft: a contract file under a class with a prepare gate is the gate's to approve — noted, not a second decision",
+                 (has(rep, "open", "decision: the scope would change the contract"),
+                  has(rep, "notes", "FOUNDATION's human gate ['gate1'] approves that before any work")), (False, True))
+
         legacy = {k: v for k, v in ORD_REPORT.items() if k != "reference_files"}
         g, c, rep, _, _ = run("KISA U-02", drafter(report=legacy))
         ct.check("draft: a report without reference_files (devflow/draft@1) still reads — its references are none",
