@@ -145,3 +145,32 @@ def claims(text):
         if m:
             out.append({"line": line.strip()[:200], "word": m.group(0)})
     return out
+
+
+# what must not leave in a gist. Deterministic and deliberately broad: a refused publish costs a
+# person a look; a published credential cannot be taken back.
+SENSITIVE = [
+    ("github token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
+    ("api key", re.compile(r"\b(?:sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})")),
+    ("aws access key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("private key", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")),
+    ("bearer token", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{20,}")),
+    ("credential assignment", re.compile(
+        r"(?i)\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token|credential)s?\b\s*[:=]\s*"
+        r"[\"']?(?![<{$]|\*{3})[^\s\"'`,;)]{8,}")),
+    ("url with credentials", re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s/:@]+:[^\s/@]+@")),
+    ("private network address", re.compile(
+        r"(?<![\d.])(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}(?![\d.])")),
+]
+
+
+def sensitive(files):
+    """[{file, line, kind}] for every line that looks like something that must not leave."""
+    found = []
+    for name in sorted(files):
+        for n, line in enumerate(files[name].splitlines(), 1):
+            for kind, pat in SENSITIVE:
+                if pat.search(line):
+                    found.append({"file": name, "line": n, "kind": kind})
+    return found

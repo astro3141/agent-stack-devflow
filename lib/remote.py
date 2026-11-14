@@ -312,6 +312,15 @@ class GitHubRemote:
         r = self._call("POST", "/pulls", {"head": head_ref, "base": base_ref, "title": title[:250], "body": body})
         return r["number"]
 
+    def create_gist(self, description, files):
+        """A secret gist of the token's account: {"id", "url"}. Secret is not a parameter — there is
+        no way to make a public one through this method. Not retried (a write): a lost response may
+        still have created it, and the caller says so."""
+        r = self._call("POST", f"{self.API}/gists", {
+            "description": description[:250], "public": False,
+            "files": {name: {"content": text} for name, text in files.items()}})
+        return {"id": r.get("id", ""), "url": r.get("html_url", "")}
+
     def close_pull(self, number, expected_head):
         pr = self.pull(number)
         if pr.get("merged") or pr["head_sha"] != expected_head:
@@ -678,6 +687,18 @@ class FixtureRemote:
         self._save()
         self._lose("create_pull")
         return n
+
+    def create_gist(self, description, files):
+        self._up()
+        if (self.db.get("faults") or {}).get("gists_denied"):
+            raise RemoteError("POST https://api.github.com/gists: HTTP 403 "
+                              '{"message":"Resource not accessible by integration"}')
+        gists = self.db.setdefault("gists", [])
+        gid = f"fixture{len(gists) + 1:04d}"
+        gists.append({"id": gid, "public": False, "description": description[:250], "files": dict(files)})
+        self._save()
+        self._lose("create_gist")
+        return {"id": gid, "url": f"https://gist.github.com/fixture/{gid}"}
 
     def materialize(self, sha, dest, only=None):
         self._up()

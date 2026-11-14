@@ -1,11 +1,11 @@
 # devflow-draft: a person's request in their own words → a draft of a devflow task issue, grounded in
 # the canonical branch and the existing issues, checked by the project's real rules. Read only.
 #
-#   gather ─OK─▶ route ─ROUTE─▶ draft_agent ─▶ check ─▶ record ─▶ ended_*
+#   gather ─OK─▶ route ─ROUTE─▶ draft_agent ─▶ check ─▶ publish ─▶ record ─▶ ended_*
 #     └──────────────┴─────────────────────────────────────▶ record
 #
 #   run_workflow.py start <id> devflow-draft long-task project=<p> "request=<what you want done>"
-#   run_workflow.py start <id> devflow-draft long-task project=<p> request_file=<name>
+#   run_workflow.py start <id> devflow-draft long-task project=<p> request_file=<name> [publish=gist]
 #     (the request as a file in the hand-in directory, /work/handoff/<name>: any language, any length)
 #
 # gather reads through a remote that refuses every write (lib/remote.py ReadOnly): the canonical
@@ -16,6 +16,11 @@
 # project hook's classify, and checks sources, classes, relations and claims. The result stays in
 # the run's workspace (/ws/<run>/draft/): nothing is posted, no issue is created or edited, nothing
 # is approved. A draft is not an issue, an approval or permission to run.
+#
+# publish is the one write, and only when this run asks (`publish=gist`) and the project's
+# registration allows it (`draft_publish: gist`), and the files pass a scan for credentials and
+# private addresses: a secret gist of the token's account with draft/issue.md and draft/report.md.
+# Not an issue, nothing in the repository; it never changes the draft's outcome.
 workflow:
   name: devflow-draft
   description: Draft a devflow task issue from a request — grounded, checked, read only
@@ -40,6 +45,11 @@ workflow:
       required: false
       default: ""
       description: the request as a hand-in by name (/work/handoff/<name>, UTF-8) — for any other language or length; exactly one of request and request_file
+    publish:
+      type: string
+      required: false
+      default: ""
+      description: "gist to share this run's draft as a secret gist (the project must allow it: draft_publish gist); empty for none"
     fixture:
       type: string
       required: false
@@ -151,6 +161,22 @@ agents:
       summary: {type: string}
       error: {type: string}
     routes:
+      - to: publish
+
+  - name: publish
+    type: script
+    description: A secret gist of the checked draft — only when this run asks (publish gist), the project allows it, and the scan finds nothing sensitive
+    command: "${POC_PY:-/opt/venv/bin/python}"
+    args: ["/work/packages/devflow/steps/draft_publish.py", "{{ workflow.input.project }}",
+           "{{ check.output.verdict }}", "{{ workflow.input.publish }}"]
+    timeout: 120
+    output:
+      status: {type: string}
+      url: {type: string}
+      gist: {type: string}
+      error: {type: string}
+      hint: {type: string}
+    routes:
       - to: record
 
   - name: record
@@ -175,7 +201,7 @@ agents:
   - name: ended_drafted
     type: terminate
     status: success
-    reason: "{{ check.output.summary }} — read {{ check.output.report }} (nothing was posted)"
+    reason: "{{ check.output.summary }} — read {{ check.output.report }}{% if publish is defined and publish.output.status == 'OK' %} · secret gist {{ publish.output.url }} (no issue was posted){% elif publish is defined and publish.output.status != 'SKIPPED' %} · gist not made: {{ publish.output.error }} {{ publish.output.hint }}{% else %} (nothing was posted){% endif %}"
 
   - name: ended_held
     type: terminate
@@ -196,4 +222,6 @@ output:
   summary: "{% if check is defined %}{{ check.output.summary }}{% endif %}"
   report: "{% if check is defined %}{{ check.output.report }}{% endif %}"
   issue: "{% if check is defined %}{{ check.output.issue }}{% endif %}"
+  publish: "{% if publish is defined %}{{ publish.output.status }}{% endif %}"
+  gist: "{% if publish is defined %}{{ publish.output.url }}{% endif %}"
   mlflow_run_id: "{{ record.output.mlflow_run_id }}"
