@@ -174,7 +174,7 @@ def check(ctx, issue_md, rep, pol):
             notes += [f"hook (as ORDINARY, for reference): {v}" for v in got.get("violations") or []]
         open_ += [f"hook decision: {d}" for d in got.get("decisions") or []]
         open_ += [f"hook gap: {g}" for g in got.get("gaps") or []]
-        notes += [f"hook: {n}" for n in got.get("notes") or []]
+        notes += [f"hook: {n}" for n in draftlib.per_file_once(got.get("notes") or [], scope)]
         if task.get("change_class"):
             open_ += [f"hook classification shape: {p}" for p in shape]
         notes.append("impacts the hook reads from the scope candidates: "
@@ -204,12 +204,19 @@ def check(ctx, issue_md, rep, pol):
                         "change is a scope candidate, and the hook reads it as one")
     # an official criterion or a contract the policy names, in the scope, is a person's decision
     # whatever class the draft proposes and whatever the project's hook says of it (the hook may only
-    # flag it): a draft never changes the meaning of the work by itself
+    # flag it): a draft never changes the meaning of the work by itself. When the proposed class
+    # already has a person approve the work before it starts (a human gate in phase prepare), that
+    # gate is the decision — it is noted, not listed a second time.
+    gated = [g.get("id") for g in ((pol.get("human_gates") or {}).get((task or {}).get("change_class")) or [])
+             if g.get("phase") == "prepare"] if task and task.get("change_class") else []
     auth = pol.get("authority") or {}
     for role, srcs in (("official criterion", auth.get("criteria") or []), ("contract", auth.get("contracts") or [])):
         named = {os.path.normpath(p) for s_ in srcs for p in (s_.get("paths") or ([s_["path"]] if s_.get("path") else []))}
         hit = sorted(f for f in scope if f in named)
-        if hit:
+        if hit and gated:
+            notes.append(f"the scope would change the {role} file(s) {hit[:6]} the policy names — "
+                         f"{task['change_class']}'s human gate {gated} approves that before any work")
+        elif hit:
             open_.append(f"decision: the scope would change the {role} file(s) {hit[:6]} the policy names — "
                          "only a person decides that, whatever the class")
     gone = [r for r in refs if not in_repo(r)]
