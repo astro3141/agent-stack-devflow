@@ -274,6 +274,11 @@ def controls_draft(ct):
                  "scope_candidates names ['tests/test_u18_shadow_perm.py'], which the issue body's scope does not"),
                 ("no scope section", U18, "", "the issue body has 0 scope sections"),
                 ("two scope sections", U18, scope_md(U18["scope_candidates"]) * 2, "the issue body has 2 scope sections"),
+                ("a scope section never closed", U18, scope_md(U18["scope_candidates"]).replace("<!-- /devflow:scope -->", ""),
+                 "scope markers: <!-- devflow:scope --> is never closed"),
+                ("a close marker before its open", U18, "\n<!-- /devflow:scope -->" + scope_md(U18["scope_candidates"]),
+                 "scope markers: <!-- /devflow:scope --> without"),
+                ("a @1 body (no scope section): drafted again, not re-checked", U18, "", "a draft written before it is drafted again"),
                 ("a reference not at the canonical commit", dict(U18, reference_files=["docs/nowhere.md"]), None,
                  "reference files not at the canonical commit: ['docs/nowhere.md']"),
                 ("reference_files that is not a list of paths", dict(U18, reference_files="docs"), None,
@@ -281,17 +286,20 @@ def controls_draft(ct):
             g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=report, fields=U18_BLOCK, prose=U18_PROSE, scope=said))
             ct.check(f"draft U-18: {name} is INVALID", (c.get("verdict"), has(rep, "blocking", want)), ("INVALID", True))
         # the official criterion and the Foundation contracts are not changed under ORDINARY
-        for name, path, want in (("the official criterion", "docs/baselines/current/주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드.pdf", "criterion_changed"),
-                                 ("a Foundation contract (TD)", "docs/TECHNICAL_DESIGN_v0.3.md", "hook: an ordinary change may not touch authority documents"),
+        PDF = "docs/baselines/current/주요정보통신기반시설 기술적 취약점 분석·평가 방법 상세가이드.pdf"
+        r = dict(U18, scope_candidates=["items/kisa/U-18.yaml", PDF], reference_files=[MATRIX])
+        g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=r, fields=U18_BLOCK, prose=U18_PROSE))
+        ct.check("draft U-18: an official criterion file in an ORDINARY scope is never DRAFTED — a person's decision "
+                 "(the project's hook only flags criterion_changed)",
+                 (c.get("verdict"), has(rep, "open", "decision: the scope would change the official criterion file(s)"),
+                  has(rep, "notes", "criterion_changed")), ("NEEDS_INPUT", True, True))
+        for name, path, want in (("a Foundation contract (TD)", "docs/TECHNICAL_DESIGN_v0.3.md", "hook: an ordinary change may not touch authority documents"),
                                  ("a frozen registry", "primitives.yaml", "hook: declared ORDINARY")):
             r = dict(U18, scope_candidates=["items/kisa/U-18.yaml", path], reference_files=[MATRIX])
             g, c, rep, _, _ = run("KISA U-18 /etc/shadow", drafter(report=r, fields=U18_BLOCK, prose=U18_PROSE))
-            if want == "criterion_changed":
-                ct.check(f"draft U-18: changing {name} is not ordinary item work — the hook reads it as a criterion change",
-                         has(rep, "notes", "criterion_changed"), True)
-            else:
-                ct.check(f"draft U-18: changing {name} under ORDINARY is refused", (c.get("verdict"), has(rep, "blocking", want)),
-                         ("INVALID", True))
+            ct.check(f"draft U-18: changing {name} under ORDINARY is refused, and is a person's decision besides",
+                     (c.get("verdict"), has(rep, "blocking", want), has(rep, "open", "decision: the scope would change the contract file(s)")),
+                     ("INVALID", True, True))
         legacy = {k: v for k, v in ORD_REPORT.items() if k != "reference_files"}
         g, c, rep, _, _ = run("KISA U-02", drafter(report=legacy))
         ct.check("draft: a report without reference_files (devflow/draft@1) still reads — its references are none",
@@ -303,7 +311,9 @@ def controls_draft(ct):
             g, c, rep, _, _ = run("KISA U-02", drafter(prose=f"## 해결할 문제\n{line}\n\n"))
             ct.check(f"draft: the negated {line!r} is not a claim", (c.get("verdict"), rep.get("blocking")), ("DRAFTED", []))
         for line in ("후보 범위(승인된 범위 아님), 그러나 D-1은 승인됨.", "Not approved, but verified by CI.",
-                     "승인된 작업이며 아직 검증되지 않았다.", "D-1 승인됨 (승인된 범위 아님)", "범위는 승인됨."):
+                     "승인된 작업이며 아직 검증되지 않았다.", "D-1 승인됨 (승인된 범위 아님)", "범위는 승인됨.",
+                     "승인된 작업은 문제가 없음.", "승인된 범위로 진행해도 문제없음.",
+                     "This workflow will not change the approved scope."):
             g, c, rep, _, _ = run("KISA U-02", drafter(prose=f"## 해결할 문제\n{line}\n\n"))
             ct.check(f"draft: the claim in {line!r} is still INVALID", has(rep, "blocking", "claims a state nobody verified"), True)
 

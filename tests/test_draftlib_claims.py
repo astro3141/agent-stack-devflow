@@ -39,6 +39,16 @@ class Claims(unittest.TestCase):
                            ("The scope is not approved and the design is confirmed.", "confirmed")):
             self.assertEqual(claimed(text), [word], text)
 
+    def test_a_negation_of_something_else_does_not_excuse_it(self):
+        # PR #13 review: the negation is of another predicate — the claim stands
+        for text, word in (("승인된 작업은 문제가 없음.", "승인된"),
+                           ("승인된 범위로 진행해도 문제없음.", "승인된"),
+                           ("승인된 작업은 문제없음.", "승인된"),
+                           ("This workflow will not change the approved scope.", "approved"),
+                           ("We do not need more; it is verified.", "verified"),
+                           ("No change is needed because it was confirmed.", "confirmed")):
+            self.assertEqual(claimed(text), [word], text)
+
     def test_negation_must_be_in_the_same_clause_and_close(self):
         # a negation further on, after a clause-joining ending, is about something else
         self.assertEqual(claimed("승인된 작업이며 아직 검증되지 않았다."), ["승인된"])
@@ -50,17 +60,28 @@ class Claims(unittest.TestCase):
         self.assertEqual(claimed("```yaml\nstatus: approved\n```"), [])
 
 
+O, C = draftlib.SCOPE_OPEN, draftlib.SCOPE_CLOSE
+
+
 class ScopeSections(unittest.TestCase):
     def test_one_section(self):
-        body = ("text `docs/x.md` outside\n<!-- devflow:scope -->\n- `items/kisa/U-18.yaml` — item\n"
-                "* `tests/t.py` (new)\nnot a list `ignored.md`\n<!-- /devflow:scope -->\n")
-        self.assertEqual(draftlib.scope_sections(body), [["items/kisa/U-18.yaml", "tests/t.py"]])
+        body = (f"text `docs/x.md` outside\n{O}\n- `items/kisa/U-18.yaml` — item\n"
+                f"* `tests/t.py` (new)\nnot a list `ignored.md`\n{C}\n")
+        self.assertEqual(draftlib.scope_sections(body), ([["items/kisa/U-18.yaml", "tests/t.py"]], []))
 
     def test_none_empty_and_many(self):
-        self.assertEqual(draftlib.scope_sections("no section"), [])
-        self.assertEqual(draftlib.scope_sections("<!-- devflow:scope -->\n- (없음)\n<!-- /devflow:scope -->"), [[]])
-        two = "<!-- devflow:scope -->\n- `a`\n<!-- /devflow:scope -->\n<!-- devflow:scope -->\n- `b`\n"
-        self.assertEqual(draftlib.scope_sections(two), [["a"], ["b"]])
+        self.assertEqual(draftlib.scope_sections("no section"), ([], []))
+        self.assertEqual(draftlib.scope_sections(f"{O}\n- (없음)\n{C}"), ([[]], []))
+        self.assertEqual(draftlib.scope_sections(f"{O}\n- `a`\n{C}\n{O}\n- `b`\n{C}"), ([["a"], ["b"]], []))
+
+    def test_markers_must_pair_in_order(self):
+        # PR #13 review: an open marker without its close is no section, and says why
+        self.assertEqual(draftlib.scope_sections(f"{O}\n- `items/kisa/U-18.yaml`\n"),
+                         ([], [f"{O} is never closed by {C}"]))
+        self.assertEqual(draftlib.scope_sections(f"{C}\n- `a`\n{O}\n- `a`\n{C}"),
+                         ([["a"]], [f"{C} without {O} before it"]))
+        self.assertEqual(draftlib.scope_sections(f"{O}\n- `a`\n{O}\n- `b`\n{C}"),
+                         ([["b"]], [f"{O} again before {C}"]))
 
 
 if __name__ == "__main__":

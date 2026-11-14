@@ -182,10 +182,13 @@ def check(ctx, issue_md, rep, pol):
 
     # what changes and what is only read
     if task:
-        stated = draftlib.scope_sections(issue_md)
+        stated, marks = draftlib.scope_sections(issue_md)
+        blocking += [f"the issue body's scope markers: {p}" for p in marks]
         if len(stated) != 1:
             blocking.append(f"the issue body has {len(stated)} scope sections ({draftlib.SCOPE_OPEN} … "
-                            f"{draftlib.SCOPE_CLOSE}); a task issue states its change scope in exactly one")
+                            f"{draftlib.SCOPE_CLOSE}); a task issue states its change scope in exactly one"
+                            + (" (the section is {}: a draft written before it is drafted again, not re-checked)"
+                               .format(draftlib.DRAFT_SCHEMA) if not stated and not marks else ""))
         else:
             said_scope = {os.path.normpath(p) for p in stated[0]}
             body_only = sorted(said_scope - set(scope))
@@ -199,6 +202,16 @@ def check(ctx, issue_md, rep, pol):
     if both:
         blocking.append(f"{both[:6]} are both a scope candidate and a reference file — a file the work would "
                         "change is a scope candidate, and the hook reads it as one")
+    # an official criterion or a contract the policy names, in the scope, is a person's decision
+    # whatever class the draft proposes and whatever the project's hook says of it (the hook may only
+    # flag it): a draft never changes the meaning of the work by itself
+    auth = pol.get("authority") or {}
+    for role, srcs in (("official criterion", auth.get("criteria") or []), ("contract", auth.get("contracts") or [])):
+        named = {os.path.normpath(p) for s_ in srcs for p in (s_.get("paths") or ([s_["path"]] if s_.get("path") else []))}
+        hit = sorted(f for f in scope if f in named)
+        if hit:
+            open_.append(f"decision: the scope would change the {role} file(s) {hit[:6]} the policy names — "
+                         "only a person decides that, whatever the class")
     gone = [r for r in refs if not in_repo(r)]
     if gone:
         blocking.append(f"reference files not at the canonical commit: {gone[:6]}")
